@@ -1,7 +1,7 @@
 # 49Agents
 
 An infinite canvas with real terminal panes powered by tmux. Access your terminals from any browser.
-<img width="1034" height="614" alt="image" src="https://github.com/user-attachments/assets/328f53e8-2246-4a76-9728-d046f5217f60" />
+<img width="2559" height="1013" alt="Screenshot 2026-02-17 010827" src="https://github.com/user-attachments/assets/33238bd9-589c-438b-85a9-1c3ee780eca3" />
 ## How It Works
 
 ```
