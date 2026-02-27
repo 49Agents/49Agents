@@ -93,10 +93,17 @@ async function handleStart() {
   }
 
   // Foreground mode
-  const token = loadToken();
+  let token = loadToken();
   if (!token) {
-    console.error('[49-agent] No token found. Run "49-agent login <token>" first.');
-    process.exit(1);
+    // Dev mode: if pointing at localhost, use the built-in dev token — no login needed
+    const isLocalhost = /^wss?:\/\/(localhost|127\.0\.0\.1)(:\d+)?($|\/)/.test(config.cloudUrl);
+    if (isLocalhost) {
+      console.log('[49-agent] Local mode: using dev token (no login required).');
+      token = 'dev';
+    } else {
+      console.error('[49-agent] No token found. Run "49-agent login <token>" first.');
+      process.exit(1);
+    }
   }
 
   // Write PID file for foreground process too (so status/stop work)
