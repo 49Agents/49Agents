@@ -95,9 +95,12 @@ async function handleStart() {
 
   // Foreground mode
   let token = loadToken();
+  let cloudUrl;
   if (!token) {
-    token = await promptConnectionMode();
-    if (!token) process.exit(1);
+    const result = await promptConnectionMode();
+    if (!result) process.exit(1);
+    token = result.token;
+    cloudUrl = result.cloudUrl;
   }
 
   // Write PID file for foreground process too (so status/stop work)
@@ -117,7 +120,7 @@ async function handleStart() {
   };
   process.on('exit', cleanupPid);
 
-  await startAgent({ token });
+  await startAgent({ token, cloudUrl });
 }
 
 function handleStatus() {
@@ -244,16 +247,21 @@ async function promptConnectionMode() {
   console.log('Where would you like to connect?');
   console.log('');
   console.log('  1) Local / private network  (no login required)');
-  console.log('  2) 49agents.com             (requires a token)');
+  console.log('  2) 49agents.com             (not yet available)');
   console.log('');
 
   const answer = (await ask('Enter choice [1/2]: ')).trim();
-  rl.close();
 
   if (answer === '1') {
-    console.log('[49-agent] Connecting in local mode (no login required).');
-    return 'dev';
+    const portInput = (await ask('Port the cloud server is running on [default: 3001]: ')).trim();
+    rl.close();
+    const port = portInput || '3001';
+    const cloudUrl = `ws://localhost:${port}`;
+    console.log(`[49-agent] Connecting to ${cloudUrl} in local mode.`);
+    return { token: 'dev', cloudUrl };
   }
+
+  rl.close();
 
   if (answer === '2') {
     console.log('');
