@@ -257,9 +257,7 @@ async function promptConnectionMode() {
 
   if (answer === '2') {
     console.log('');
-    console.log('Get your token from https://49agents.com, then run:');
-    console.log('');
-    console.log('  49-agent login <YOUR_TOKEN>');
+    console.log('Cloud mode is not yet available. Please choose option 1 for now :)');
     console.log('');
     return null;
   }
