@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync } from '
 import { join, dirname } from 'path';
 import { fork } from 'child_process';
 import { fileURLToPath } from 'url';
+import { createInterface } from 'readline';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -95,15 +96,8 @@ async function handleStart() {
   // Foreground mode
   let token = loadToken();
   if (!token) {
-    // Dev mode: if pointing at localhost, use the built-in dev token — no login needed
-    const isLocalhost = /^wss?:\/\/(localhost|127\.0\.0\.1)(:\d+)?($|\/)/.test(config.cloudUrl);
-    if (isLocalhost) {
-      console.log('[49-agent] Local mode: using dev token (no login required).');
-      token = 'dev';
-    } else {
-      console.error('[49-agent] No token found. Run "49-agent login <token>" first.');
-      process.exit(1);
-    }
+    token = await promptConnectionMode();
+    if (!token) process.exit(1);
   }
 
   // Write PID file for foreground process too (so status/stop work)
@@ -238,6 +232,40 @@ WantedBy=multi-user.target`;
   } else {
     console.log('[49-agent] Service installation is only supported on Linux (systemd) and macOS (launchd).');
   }
+}
+
+async function promptConnectionMode() {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (q) => new Promise((resolve) => rl.question(q, resolve));
+
+  console.log('');
+  console.log('No authentication token found.');
+  console.log('');
+  console.log('Where would you like to connect?');
+  console.log('');
+  console.log('  1) Local / private network  (no login required)');
+  console.log('  2) 49agents.com             (requires a token)');
+  console.log('');
+
+  const answer = (await ask('Enter choice [1/2]: ')).trim();
+  rl.close();
+
+  if (answer === '1') {
+    console.log('[49-agent] Connecting in local mode (no login required).');
+    return 'dev';
+  }
+
+  if (answer === '2') {
+    console.log('');
+    console.log('Get your token from https://49agents.com, then run:');
+    console.log('');
+    console.log('  49-agent login <YOUR_TOKEN>');
+    console.log('');
+    return null;
+  }
+
+  console.error('[49-agent] Invalid choice. Exiting.');
+  return null;
 }
 
 function printHelp() {
