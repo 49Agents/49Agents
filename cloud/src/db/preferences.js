@@ -1,0 +1,55 @@
+import { getDb } from './index.js';
+
+const DEFAULTS = {
+  night_mode: 0,
+  terminal_theme: 'default',
+  notification_sound: 1,
+  auto_remove_done: 0,
+  canvas_bg: 'default',
+  snooze_duration: 90,
+  terminal_font: 'JetBrains Mono',
+  hud_state: '{}',
+  tutorials_completed: '{}',
+};
+
+/**
+ * Get preferences for a user (returns defaults if none saved).
+ */
+export function getPreferences(userId) {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM user_preferences WHERE user_id = ?').get(userId);
+  return row || { user_id: userId, ...DEFAULTS };
+}
+
+/**
+ * Save/update user preferences (upsert).
+ */
+export function savePreferences(userId, prefs) {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO user_preferences (user_id, night_mode, terminal_theme, notification_sound, auto_remove_done, canvas_bg, snooze_duration, terminal_font, hud_state, tutorials_completed, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(user_id) DO UPDATE SET
+      night_mode = excluded.night_mode,
+      terminal_theme = excluded.terminal_theme,
+      notification_sound = excluded.notification_sound,
+      auto_remove_done = excluded.auto_remove_done,
+      canvas_bg = excluded.canvas_bg,
+      snooze_duration = excluded.snooze_duration,
+      terminal_font = excluded.terminal_font,
+      hud_state = excluded.hud_state,
+      tutorials_completed = excluded.tutorials_completed,
+      updated_at = datetime('now')
+  `).run(
+    userId,
+    prefs.nightMode ? 1 : 0,
+    prefs.terminalTheme || 'default',
+    prefs.notificationSound ? 1 : 0,
+    prefs.autoRemoveDone ? 1 : 0,
+    prefs.canvasBg || 'default',
+    prefs.snoozeDuration ?? 90,
+    prefs.terminalFont || 'JetBrains Mono',
+    prefs.hudState ? JSON.stringify(prefs.hudState) : '{}',
+    prefs.tutorialsCompleted ? JSON.stringify(prefs.tutorialsCompleted) : '{}'
+  );
+}

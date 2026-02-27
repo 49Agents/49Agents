@@ -1,0 +1,13 @@
+{
+  "name": "@49agents/agent",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "49-agent": "./bin/49-agent.js"
+  },
+  "dependencies": {
+    "ws": "^8.14.2",
+    "uuid": "^9.0.0"
+  }
+}

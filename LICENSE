@@ -1,0 +1,63 @@
+Business Source License 1.1
+
+Licensor:       49Agents
+Software:       49Agents
+Change Date:    2030-02-26
+Change License: MIT License
+
+Additional Use Grant:
+
+You may use the Licensed Work in production, including for commercial
+purposes, provided that your organization (including all affiliates)
+meets BOTH of the following:
+
+  (a) Less than $1,000,000 USD in trailing 12-month gross revenue, AND
+  (b) Less than $1,000,000 USD in total equity funding or debt raised.
+
+If your organization exceeds either threshold, you must purchase a
+commercial license from the Licensor before using the Licensed Work
+in production. Individual, personal, non-commercial use is always
+permitted regardless of these thresholds.
+
+Terms and Conditions
+
+This Business Source License 1.1 ("BSL") applies to the Licensor's
+Software ("Licensed Work") and establishes the terms of its use.
+
+1. Grant of License
+
+The Licensor hereby grants you the right to copy, modify, create
+derivative works, redistribute, and make non-production use of the
+Licensed Work. You may also make production use of the Licensed Work
+provided such use does not violate the Additional Use Grant outlined
+above.
+
+2. Limitation
+
+Any commercial or production use of the Licensed Work that exceeds the
+limits defined in the Additional Use Grant requires a separate commercial
+license from the Licensor.
+
+3. Change Date
+
+On the Change Date specified above, this BSL will automatically terminate
+and the Licensed Work will instead be licensed under the Change License
+specified above. If no Change License is specified, the Change License is
+the GPL Version 2.0 or any later version.
+
+4. Notices
+
+You must ensure that anyone who gets a copy of any part of the Licensed
+Work from you also gets a copy of these terms. If you modify the Licensed
+Work, you must carry forward the Licensor's copyright notices and this
+license.
+
+5. Disclaimer of Warranty
+
+THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE LICENSED WORK OR THE USE OR OTHER
+DEALINGS IN THE LICENSED WORK.

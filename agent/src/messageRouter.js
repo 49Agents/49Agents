@@ -1,0 +1,726 @@
+import { MSG } from './protocol.js';
+import { terminalManager } from './terminalManager.js';
+import { tmuxService } from '../services/tmux.js';
+import { filePaneService } from '../services/filePanes.js';
+import { noteService } from '../services/notes.js';
+import { gitGraphService } from '../services/gitGraph.js';
+import { iframeService } from '../services/iframes.js';
+import { beadsService } from '../services/beads.js';
+import { folderPaneService } from '../services/folderPanes.js';
+import { getLocalMetrics } from '../services/metrics.js';
+import { performUpdate } from './updater.js';
+import { exec, execSync } from 'child_process';
+import { promisify } from 'util';
+import { readdirSync, statSync, readFileSync, writeFileSync, existsSync, unlinkSync, renameSync, rmdirSync, mkdirSync } from 'fs';
+
+const execAsync = promisify(exec);
+import { join, basename } from 'path';
+import { homedir } from 'os';
+
+// Get local hostname
+let localHostname = 'localhost';
+try {
+  localHostname = execSync('hostname', { encoding: 'utf-8' }).trim();
+} catch {}
+
+function expandHome(p) {
+  if (p === '~' || p === '~/') return homedir();
+  if (p.startsWith('~/')) return join(homedir(), p.slice(2));
+  return p;
+}
+
+/**
+ * Create a message router that dispatches incoming relay messages
+ * to local services and sends responses back through the relay.
+ *
+ * @param {Function} sendToRelay - function(type, payload) to send messages back to cloud
+ * @param {Object} [options] - optional callbacks
+ * @returns {Function} handler - function(message) to handle incoming messages
+ */
+export function createMessageRouter(sendToRelay, options = {}) {
+
+  // Usage API cache (5-minute TTL to avoid rate limiting)
+  const USAGE_CACHE_TTL = 5 * 60 * 1000;
+  let usageCache = null;
+  let usageCacheTime = 0;
+
+  // Terminal message handlers
+  // Track which terminals we've already wired up relay listeners for
+  const wiredTerminals = new Set();
+
+  // Buffer live output while history capture is in-flight.
+  // Without this, ttyd output reaches the browser before terminal:history,
+  // causing garbled/out-of-order content on page load.
+  const pendingHistoryCapture = new Map(); // terminalId -> base64Data[]
+
+  // Capture tmux history, send it, then flush any buffered output.
+  async function captureHistoryAndFlush(terminalId, cols, rows) {
+    pendingHistoryCapture.set(terminalId, []);
+    try {
+      // Resize tmux pane to match browser BEFORE capturing. ttyd sends the
+      // resize via pty ioctl which races with our capture — by calling
+      // tmux resize-pane directly we guarantee the correct width.
+      await tmuxService.resizeTerminal(terminalId, cols, rows);
+    } catch {}
+    try {
+      const history = await tmuxService.captureHistory(terminalId);
+      if (history) {
+        const normalized = history.replace(/\n/g, '\r\n');
+        const base64History = Buffer.from(normalized).toString('base64');
+        sendToRelay(MSG.TERMINAL_HISTORY, { terminalId, data: base64History });
+      }
+    } catch (err) {
+      console.error(`[Terminal] Failed to capture history for ${terminalId.slice(0,8)}:`, err.message);
+    }
+    // Flush buffered output that arrived during capture
+    const buffered = pendingHistoryCapture.get(terminalId);
+    pendingHistoryCapture.delete(terminalId);
+    if (buffered) {
+      for (const data of buffered) {
+        sendToRelay(MSG.TERMINAL_OUTPUT, { terminalId, data });
+      }
+    }
+    sendToRelay(MSG.TERMINAL_ATTACHED, { terminalId, cols, rows });
+  }
+
+  const terminalHandlers = {
+    [MSG.TERMINAL_ATTACH]: async (payload) => {
+      const { terminalId, cols, rows } = payload;
+      const alreadyWired = wiredTerminals.has(terminalId);
+      const emitter = await terminalManager.attachTerminal(terminalId, cols, rows);
+
+      // Always wire error handler to prevent crash on ttyd failures
+      emitter.on('error', (message) => {
+        console.error(`[Terminal] Error for ${terminalId.slice(0,8)}:`, message);
+        sendToRelay(MSG.TERMINAL_ERROR, { terminalId, message });
+      });
+
+      if (!alreadyWired) {
+        wiredTerminals.add(terminalId);
+
+        emitter.on('output', (base64Data) => {
+          // Buffer output while history capture is in-flight
+          const pending = pendingHistoryCapture.get(terminalId);
+          if (pending) {
+            pending.push(base64Data);
+            return;
+          }
+          sendToRelay(MSG.TERMINAL_OUTPUT, { terminalId, data: base64Data });
+        });
+
+        emitter.on('closed', () => {
+          wiredTerminals.delete(terminalId);
+          pendingHistoryCapture.delete(terminalId);
+          sendToRelay(MSG.TERMINAL_CLOSED, { terminalId });
+        });
+
+        // Capture history directly instead of relying on the 'attached' event.
+        // terminalManager emits 'attached' via process.nextTick, which fires
+        // BEFORE promise microtasks in Node.js — so the handler wired above
+        // would never catch it (the event fires before this code runs).
+        await captureHistoryAndFlush(terminalId, cols, rows);
+      } else {
+        // Already attached — buffer output during history recapture
+        await captureHistoryAndFlush(terminalId, cols, rows);
+      }
+      // Force tmux to resend screen content by nudging the pane size.
+      // Without this, terminals reconnected after relay drops (or resumed
+      // after being killed) may show stale/blank visible area.
+      setTimeout(() => {
+        tmuxService.forceRedraw(terminalId, cols, rows).catch(() => {});
+      }, 200);
+    },
+
+    [MSG.TERMINAL_INPUT]: (payload) => {
+      terminalManager.sendInput(payload.terminalId, payload.data);
+    },
+
+    [MSG.TERMINAL_RESIZE]: (payload) => {
+      terminalManager.resizeTerminal(payload.terminalId, payload.cols, payload.rows);
+    },
+
+    [MSG.TERMINAL_SCROLL]: (payload) => {
+      terminalManager.scrollTerminal(payload.terminalId, payload.lines);
+    },
+
+    [MSG.TERMINAL_CLOSE]: async (payload) => {
+      wiredTerminals.delete(payload.terminalId);
+      await terminalManager.closeTerminal(payload.terminalId);
+      sendToRelay(MSG.TERMINAL_CLOSED, { terminalId: payload.terminalId });
+    },
+
+    [MSG.TERMINAL_DETACH]: (payload) => {
+      wiredTerminals.delete(payload.terminalId);
+      terminalManager.detachTerminal(payload.terminalId);
+      sendToRelay('terminal:detached', { terminalId: payload.terminalId });
+    },
+  };
+
+  /**
+   * Handle REST-over-WS requests: dispatches by method + path to service functions.
+   * Request format: { type: 'request', id: '<uuid>', payload: { method, path, body } }
+   * Response format: { type: 'response', id: '<uuid>', payload: { status, body } }
+   */
+  async function handleRequest(message) {
+    const { id, payload } = message;
+    const { method, body = {} } = payload;
+
+    // Parse query params from path (frontend embeds them in the URL)
+    let path = payload.path;
+    let query = {};
+    const qIdx = path.indexOf('?');
+    if (qIdx !== -1) {
+      const qs = path.slice(qIdx + 1);
+      path = path.slice(0, qIdx);
+      for (const pair of qs.split('&')) {
+        const eqIdx = pair.indexOf('=');
+        if (eqIdx !== -1) {
+          query[decodeURIComponent(pair.slice(0, eqIdx))] = decodeURIComponent(pair.slice(eqIdx + 1));
+        }
+      }
+    }
+
+    const respond = (status, responseBody) => {
+      sendToRelay(MSG.RESPONSE, { status, body: responseBody }, { id });
+    };
+
+    try {
+      // Route based on method + path
+      const route = `${method} ${path}`;
+
+      switch (route) {
+        // === Terminals ===
+        case 'GET /api/terminals': {
+          const terminals = await tmuxService.listTerminals();
+          return respond(200, terminals);
+        }
+        case 'POST /api/terminals': {
+          const { workingDir = '~', position, device, size } = body;
+          const terminal = await tmuxService.createTerminal(workingDir, position, device, size);
+          return respond(200, terminal);
+        }
+        case 'POST /api/terminals/resume': {
+          const { terminalId, workingDir = '~', command = null } = body;
+          if (!terminalId) return respond(400, { error: 'terminalId required' });
+          const terminal = await tmuxService.resumeTerminal(terminalId, workingDir, command);
+          return respond(200, terminal);
+        }
+        case 'GET /api/terminals/processes': {
+          const processes = await tmuxService.getAllProcessInfo();
+          return respond(200, processes);
+        }
+        case 'GET /api/terminals/states': {
+          const states = await tmuxService.getAllClaudeStates();
+          return respond(200, states);
+        }
+
+        // === File browsing ===
+        case 'GET /api/files/browse': {
+          const dirPath = query.path || '~';
+          const resolvedPath = expandHome(dirPath);
+          const items = readdirSync(resolvedPath);
+          let entries = [];
+          for (const name of items) {
+            if (!query.showHidden && name.startsWith('.')) continue;
+            try {
+              const fullPath = join(resolvedPath, name);
+              const stat = statSync(fullPath);
+              entries.push({
+                name,
+                type: stat.isDirectory() ? 'dir' : 'file',
+                size: stat.size,
+              });
+            } catch { /* skip files we can't stat */ }
+          }
+          entries.sort((a, b) => {
+            if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+            return a.name.localeCompare(b.name);
+          });
+          return respond(200, { path: resolvedPath, entries });
+        }
+        case 'GET /api/files/read': {
+          const filePath = query.path;
+          if (!filePath) {
+            return respond(400, { error: 'path parameter required' });
+          }
+          const resolvedPath = expandHome(filePath);
+          const content = readFileSync(resolvedPath, 'utf-8');
+          const fileName = resolvedPath.split('/').pop() || basename(resolvedPath);
+          return respond(200, { content, fileName, filePath: resolvedPath, device: localHostname });
+        }
+        case 'POST /api/files/create': {
+          const { path: filePath } = body;
+          if (!filePath) {
+            return respond(400, { error: 'path parameter required' });
+          }
+          const resolvedPath = expandHome(filePath);
+          writeFileSync(resolvedPath, '', 'utf-8');
+          const fileName = basename(filePath);
+          return respond(200, { fileName, filePath, device: localHostname });
+        }
+        case 'DELETE /api/files/delete': {
+          const { path: filePath } = body;
+          if (!filePath) return respond(400, { error: 'path parameter required' });
+          const resolvedPath = expandHome(filePath);
+          const stat = statSync(resolvedPath);
+          if (stat.isDirectory()) {
+            rmdirSync(resolvedPath);
+          } else {
+            unlinkSync(resolvedPath);
+          }
+          return respond(200, { success: true });
+        }
+        case 'POST /api/files/rename': {
+          const { oldPath, newPath } = body;
+          if (!oldPath || !newPath) return respond(400, { error: 'oldPath and newPath required' });
+          renameSync(expandHome(oldPath), expandHome(newPath));
+          return respond(200, { success: true, newPath: expandHome(newPath) });
+        }
+        case 'POST /api/files/mkdir': {
+          const { path: dirPath } = body;
+          if (!dirPath) return respond(400, { error: 'path parameter required' });
+          const resolvedPath = expandHome(dirPath);
+          mkdirSync(resolvedPath, { recursive: true });
+          return respond(200, { success: true, path: resolvedPath });
+        }
+
+        // === File Panes ===
+        case 'GET /api/file-panes': {
+          const filePanes = filePaneService.listFilePanes();
+          return respond(200, filePanes);
+        }
+        case 'POST /api/file-panes': {
+          const { fileName, filePath, content, position, device, size } = body;
+          const filePane = filePaneService.createFilePane({ fileName, filePath, content, position, device, size });
+          return respond(200, filePane);
+        }
+
+        // === Notes ===
+        case 'GET /api/notes': {
+          const notes = noteService.listNotes();
+          return respond(200, notes);
+        }
+        case 'POST /api/notes': {
+          const { position, size } = body;
+          const note = noteService.createNote({ position, size });
+          return respond(200, note);
+        }
+
+        // === Git Graphs ===
+        case 'GET /api/git-repos': {
+          const onFound = (repo) => sendToRelay(MSG.SCAN_PARTIAL, { repos: [repo] }, { id });
+          const repos = await gitGraphService.scanForRepos(onFound);
+          return respond(200, repos);
+        }
+        case 'GET /api/git-repos/in-folder': {
+          const folderPath = query.path;
+          if (!folderPath) {
+            return respond(400, { error: 'path query param required' });
+          }
+          const onFound = (repo) => sendToRelay(MSG.SCAN_PARTIAL, { repos: [repo] }, { id });
+          const repos = await gitGraphService.scanReposInFolder(folderPath, onFound);
+          return respond(200, repos);
+        }
+        case 'GET /api/git-graphs': {
+          const gitGraphs = gitGraphService.listGitGraphs();
+          return respond(200, gitGraphs);
+        }
+        case 'POST /api/git-graphs': {
+          const { repoPath, position, device, size } = body;
+          if (!repoPath) {
+            return respond(400, { error: 'repoPath is required' });
+          }
+          const gitGraph = gitGraphService.createGitGraph({ repoPath, position, device, size });
+          return respond(200, gitGraph);
+        }
+
+        // === Iframes ===
+        case 'GET /api/iframes': {
+          const iframes = iframeService.listIframes();
+          return respond(200, iframes);
+        }
+        case 'POST /api/iframes': {
+          const { url, position, size } = body;
+          const iframe = iframeService.createIframe({ url, position, size });
+          return respond(200, iframe);
+        }
+
+        // === Beads ===
+        case 'GET /api/beads-projects/in-folder': {
+          const rawPath = query.path;
+          if (!rawPath) return respond(400, { error: 'path query param required' });
+          const folderPath = expandHome(rawPath);
+          const onFound = (repo) => {
+            if (existsSync(join(repo.path, '.beads'))) {
+              sendToRelay(MSG.SCAN_PARTIAL, { repos: [repo] }, { id });
+            }
+          };
+          const repos = await gitGraphService.scanReposInFolder(folderPath, onFound);
+          const subRepos = repos.filter(r => r.path !== folderPath);
+          const candidates = [{ path: folderPath, name: folderPath.split('/').pop() }, ...subRepos];
+          const beadsProjects = candidates.filter(r => existsSync(join(r.path, '.beads')));
+          return respond(200, beadsProjects);
+        }
+        case 'GET /api/beads-panes': {
+          const beadsPanes = beadsService.listBeadsPanes();
+          return respond(200, beadsPanes);
+        }
+        case 'POST /api/beads-panes': {
+          const { projectPath, position, size, device } = body;
+          const beadsPane = beadsService.createBeadsPane({ projectPath, position, size, device });
+          return respond(200, beadsPane);
+        }
+
+        // === Folder Panes ===
+        case 'GET /api/folder-panes': {
+          const folderPanes = folderPaneService.listFolderPanes();
+          return respond(200, folderPanes);
+        }
+        case 'POST /api/folder-panes': {
+          const { folderPath, position, size } = body;
+          const folderPane = folderPaneService.createFolderPane({ folderPath, position, size });
+          return respond(200, folderPane);
+        }
+
+        // === Git Status (lightweight, for folder pane — async) ===
+        case 'GET /api/git-status': {
+          const gsPath = expandHome(query.path || '~');
+          const gsOpts = { cwd: gsPath, encoding: 'utf-8', timeout: 10000 };
+          try {
+            await execAsync('git rev-parse --is-inside-work-tree', gsOpts);
+            const [gsRootResult, gsBranchResult, porcelainResult] = await Promise.all([
+              execAsync('git rev-parse --show-toplevel', gsOpts),
+              execAsync('git branch --show-current', gsOpts),
+              execAsync('git status --porcelain', gsOpts),
+            ]);
+            const gsRoot = gsRootResult.stdout.trim();
+            const gsBranch = gsBranchResult.stdout.trim() || 'HEAD';
+            const porcelainRaw = porcelainResult.stdout;
+            const files = {};
+            let staged = 0, unstaged = 0, untracked = 0;
+            for (const line of porcelainRaw.split('\n').filter(l => l.length >= 4)) {
+              const x = line[0], y = line[1];
+              const filePath = line.slice(3).split(' -> ').pop();
+              const absPath = gsRoot + '/' + filePath;
+              let status = 'modified';
+              if (x === '?' && y === '?') { status = 'untracked'; untracked++; }
+              else if (x === 'A' || y === 'A') { status = 'added'; if (x !== ' ') staged++; if (y !== ' ' && y !== '?') unstaged++; }
+              else if (x === 'D' || y === 'D') { status = 'deleted'; if (x !== ' ') staged++; if (y !== ' ' && y !== '?') unstaged++; }
+              else if (x === 'R') { status = 'renamed'; staged++; if (y !== ' ') unstaged++; }
+              else { if (x !== ' ') staged++; if (y !== ' ' && y !== '?') unstaged++; }
+              files[absPath] = status;
+            }
+            const gsTotal = staged + unstaged + untracked;
+            return respond(200, { isGit: true, branch: gsBranch, clean: gsTotal === 0, uncommitted: { total: gsTotal, staged, unstaged, untracked }, files });
+          } catch {
+            return respond(200, { isGit: false });
+          }
+        }
+
+        // === Usage (proxy to Anthropic API with caching) ===
+        case 'GET /api/usage': {
+          const now = Date.now();
+          if (usageCache && (now - usageCacheTime) < USAGE_CACHE_TTL) {
+            return respond(200, usageCache);
+          }
+          try {
+            const credPath = join(homedir(), '.claude', '.credentials.json');
+            let creds;
+            try {
+              creds = JSON.parse(readFileSync(credPath, 'utf-8'));
+            } catch (readErr) {
+              console.warn(`[usage] Cannot read credentials at ${credPath}:`, readErr.code || readErr.message);
+              return respond(503, { error: `Cannot read credentials: ${readErr.code || readErr.message}` });
+            }
+            const token = creds.claudeAiOauth?.accessToken;
+            if (!token) {
+              console.warn('[usage] No claudeAiOauth.accessToken in credentials file');
+              return respond(503, { error: 'Claude credentials not available' });
+            }
+
+            const resp = await fetch('https://api.anthropic.com/api/oauth/usage', {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'anthropic-beta': 'oauth-2025-04-20'
+              }
+            });
+            if (!resp.ok) {
+              const text = await resp.text();
+              console.warn(`[usage] Anthropic API returned ${resp.status}:`, text.slice(0, 200));
+              return respond(resp.status, { error: text });
+            }
+            const data = await resp.json();
+            usageCache = data;
+            usageCacheTime = now;
+            return respond(200, data);
+          } catch (err) {
+            console.warn('[usage] Failed to fetch usage data:', err.message);
+            return respond(500, { error: err.message || 'Failed to fetch usage data' });
+          }
+        }
+
+        // === Metrics ===
+        case 'GET /api/metrics': {
+          const metrics = await getLocalMetrics();
+          return respond(200, [{ name: localHostname, ip: '127.0.0.1', os: process.platform, online: true, isLocal: true, metrics }]);
+        }
+
+        // === Devices (local only for agent) ===
+        case 'GET /api/devices': {
+          return respond(200, [{
+            name: localHostname,
+            ip: '127.0.0.1',
+            os: process.platform,
+            online: true,
+            isLocal: true,
+          }]);
+        }
+
+        default:
+          break;
+      }
+
+      // Handle parameterized routes (with :id)
+      // Terminal routes: DELETE /api/terminals/:id
+      const terminalMatch = path.match(/^\/api\/terminals\/([^/]+)$/);
+      if (terminalMatch) {
+        const id = terminalMatch[1];
+        if (method === 'DELETE') {
+          await tmuxService.closeTerminal(id);
+          return respond(200, { success: true });
+        }
+      }
+
+      // File pane routes: GET/PATCH/DELETE /api/file-panes/:id
+      const filePaneMatch = path.match(/^\/api\/file-panes\/([^/]+)$/);
+      if (filePaneMatch) {
+        const id = filePaneMatch[1];
+        if (method === 'GET') {
+          const refresh = query.refresh === 'true';
+          const filePane = filePaneService.getFilePane(id, refresh);
+          if (!filePane) return respond(404, { error: 'File pane not found' });
+          return respond(200, filePane);
+        }
+        if (method === 'PATCH') {
+          const updates = {};
+          // Position/size now handled by cloud-only storage
+          if (body.content !== undefined) updates.content = body.content;
+          filePaneService.updateFilePane(id, updates);
+          return respond(200, { success: true });
+        }
+        if (method === 'DELETE') {
+          filePaneService.deleteFilePane(id);
+          return respond(200, { success: true });
+        }
+      }
+
+      // Note routes: GET/PATCH/DELETE /api/notes/:id
+      const noteMatch = path.match(/^\/api\/notes\/([^/]+)$/);
+      if (noteMatch) {
+        const id = noteMatch[1];
+        if (method === 'GET') {
+          const note = noteService.getNote(id);
+          if (!note) return respond(404, { error: 'Note not found' });
+          return respond(200, note);
+        }
+        if (method === 'PATCH') {
+          const updates = {};
+          // Position/size now handled by cloud-only storage
+          if (body.content !== undefined) updates.content = body.content;
+          if (body.fontSize !== undefined) updates.fontSize = body.fontSize;
+          noteService.updateNote(id, updates);
+          return respond(200, { success: true });
+        }
+        if (method === 'DELETE') {
+          noteService.deleteNote(id);
+          return respond(200, { success: true });
+        }
+      }
+
+      // Git graph routes: GET/PATCH/DELETE /api/git-graphs/:id, GET /api/git-graphs/:id/data, POST /api/git-graphs/:id/push
+      const gitGraphDataMatch = path.match(/^\/api\/git-graphs\/([^/]+)\/data$/);
+      if (gitGraphDataMatch && method === 'GET') {
+        const id = gitGraphDataMatch[1];
+        const gitGraph = gitGraphService.getGitGraph(id);
+        if (!gitGraph) return respond(404, { error: 'Git graph pane not found' });
+        const maxCommits = parseInt(query.maxCommits) || 50;
+        const data = await gitGraphService.fetchGraphData(gitGraph.repoPath, maxCommits);
+        return respond(200, data);
+      }
+
+      const gitGraphPushMatch = path.match(/^\/api\/git-graphs\/([^/]+)\/push$/);
+      if (gitGraphPushMatch && method === 'POST') {
+        const id = gitGraphPushMatch[1];
+        const gitGraph = gitGraphService.getGitGraph(id);
+        if (!gitGraph) return respond(404, { error: 'Git graph pane not found' });
+        try {
+          const { stdout, stderr } = await execAsync('git push origin HEAD 2>&1', {
+            cwd: gitGraph.repoPath,
+            encoding: 'utf-8',
+            timeout: 30000,
+          });
+          return respond(200, { success: true, output: (stdout || stderr || '').trim() });
+        } catch (error) {
+          const stderr = error.stderr || error.stdout || error.message;
+          return respond(500, { error: stderr.trim() });
+        }
+      }
+
+      const gitGraphMatch = path.match(/^\/api\/git-graphs\/([^/]+)$/);
+      if (gitGraphMatch) {
+        const id = gitGraphMatch[1];
+        if (method === 'PATCH') {
+          const updates = {};
+          // Position/size now handled by cloud-only storage
+          if (body.repoPath !== undefined) updates.repoPath = body.repoPath;
+          gitGraphService.updateGitGraph(id, updates);
+          return respond(200, { success: true });
+        }
+        if (method === 'DELETE') {
+          gitGraphService.deleteGitGraph(id);
+          return respond(200, { success: true });
+        }
+      }
+
+      // Iframe routes: PATCH/DELETE /api/iframes/:id
+      const iframeMatch = path.match(/^\/api\/iframes\/([^/]+)$/);
+      if (iframeMatch) {
+        const id = iframeMatch[1];
+        if (method === 'PATCH') {
+          const updates = {};
+          // Position/size now handled by cloud-only storage
+          if (body.url !== undefined) updates.url = body.url;
+          const iframe = iframeService.updateIframe(id, updates);
+          return respond(200, iframe);
+        }
+        if (method === 'DELETE') {
+          iframeService.deleteIframe(id);
+          return respond(200, { success: true });
+        }
+      }
+
+      // Beads pane routes: GET /api/beads-panes/:id/data, PATCH/DELETE /api/beads-panes/:id
+      const beadsDataMatch = path.match(/^\/api\/beads-panes\/([^/]+)\/data$/);
+      if (beadsDataMatch && method === 'GET') {
+        const id = beadsDataMatch[1];
+        const beadsPane = beadsService.getBeadsPane(id);
+        if (!beadsPane) return respond(404, { error: 'Beads pane not found' });
+        const statusFilter = query.status || null;
+        const data = await beadsService.fetchIssues(beadsPane.projectPath, statusFilter);
+        return respond(200, data);
+      }
+
+      // POST /api/beads-panes/:id/issues/:issueId/close
+      const beadsCloseMatch = path.match(/^\/api\/beads-panes\/([^/]+)\/issues\/([^/]+)\/close$/);
+      if (beadsCloseMatch && method === 'POST') {
+        const id = beadsCloseMatch[1];
+        const issueId = beadsCloseMatch[2];
+        const beadsPane = beadsService.getBeadsPane(id);
+        if (!beadsPane) return respond(404, { error: 'Beads pane not found' });
+        const result = await beadsService.closeIssue(beadsPane.projectPath, issueId);
+        return respond(200, result);
+      }
+
+      // POST /api/beads-panes/:id/issues (create)
+      const beadsCreateMatch = path.match(/^\/api\/beads-panes\/([^/]+)\/issues$/);
+      if (beadsCreateMatch && method === 'POST') {
+        const id = beadsCreateMatch[1];
+        const beadsPane = beadsService.getBeadsPane(id);
+        if (!beadsPane) return respond(404, { error: 'Beads pane not found' });
+        const result = await beadsService.createIssue(beadsPane.projectPath, body);
+        return respond(200, result);
+      }
+
+      // GET /api/beads-panes/:id/issues/:issueId
+      const beadsIssueMatch = path.match(/^\/api\/beads-panes\/([^/]+)\/issues\/([^/]+)$/);
+      if (beadsIssueMatch && method === 'GET') {
+        const id = beadsIssueMatch[1];
+        const issueId = beadsIssueMatch[2];
+        const beadsPane = beadsService.getBeadsPane(id);
+        if (!beadsPane) return respond(404, { error: 'Beads pane not found' });
+        const issue = await beadsService.fetchIssue(beadsPane.projectPath, issueId);
+        return respond(200, issue);
+      }
+
+      const beadsPaneMatch = path.match(/^\/api\/beads-panes\/([^/]+)$/);
+      if (beadsPaneMatch) {
+        const id = beadsPaneMatch[1];
+        if (method === 'PATCH') {
+          const updates = {};
+          // Position/size now handled by cloud-only storage
+          if (body.projectPath !== undefined) updates.projectPath = body.projectPath;
+          beadsService.updateBeadsPane(id, updates);
+          return respond(200, { success: true });
+        }
+        if (method === 'DELETE') {
+          beadsService.deleteBeadsPane(id);
+          return respond(200, { success: true });
+        }
+      }
+
+      // Folder pane routes: PATCH/DELETE /api/folder-panes/:id
+      const folderPaneMatch = path.match(/^\/api\/folder-panes\/([^/]+)$/);
+      if (folderPaneMatch) {
+        const id = folderPaneMatch[1];
+        if (method === 'PATCH') {
+          const updates = {};
+          if (body.folderPath !== undefined) updates.folderPath = body.folderPath;
+          const pane = folderPaneService.updateFolderPane(id, updates);
+          return respond(200, pane);
+        }
+        if (method === 'DELETE') {
+          folderPaneService.deleteFolderPane(id);
+          return respond(200, { success: true });
+        }
+      }
+
+      // If no route matched
+      respond(404, { error: `Route not found: ${method} ${path}` });
+
+    } catch (error) {
+      console.error(`[MessageRouter] Error handling ${method} ${path}:`, error);
+      respond(500, { error: error.message || 'Internal server error' });
+    }
+  }
+
+  /**
+   * Main message handler — dispatches terminal messages and REST-over-WS requests.
+   */
+  return async function handleMessage(message) {
+    const { type } = message;
+
+    // Terminal messages
+    if (terminalHandlers[type]) {
+      try {
+        await terminalHandlers[type](message.payload);
+      } catch (error) {
+        console.error(`[MessageRouter] Error handling ${type}:`, error);
+      }
+      return;
+    }
+
+    // REST-over-WS request
+    if (type === MSG.REQUEST) {
+      await handleRequest(message);
+      return;
+    }
+
+    // Update notifications
+    if (type === 'update:available') {
+      console.log(`[Agent] Update available: ${message.payload?.currentVersion} → ${message.payload?.latestVersion}`);
+      return;
+    }
+
+    if (type === 'update:install') {
+      console.log('[Agent] Update requested by user, starting self-update...');
+      performUpdate((status) => {
+        sendToRelay('update:progress', { status });
+      }).catch(err => {
+        console.error('[Agent] Update failed:', err.message);
+      });
+      return;
+    }
+
+    console.warn(`[MessageRouter] Unknown message type: ${type}`);
+  };
+}

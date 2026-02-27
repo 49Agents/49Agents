@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>49Agents</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@200&family=JetBrains+Mono:wght@400&family=Fira+Code:wght@400&family=Source+Code+Pro:wght@400&family=IBM+Plex+Mono:wght@400&family=Inconsolata:wght@400&family=Ubuntu+Mono:wght@400&family=Roboto+Mono:wght@400&family=Space+Mono:wght@400&family=Anonymous+Pro:wght@400&family=Cousine:wght@400&family=PT+Mono&family=Overpass+Mono:wght@400&family=Noto+Sans+Mono:wght@400&family=DM+Mono:wght@400&family=Red+Hat+Mono:wght@400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="lib/xterm.css">
+</head>
+<body>
+  <div id="canvas-container">
+    <div id="canvas"></div>
+  </div>
+
+  <button id="add-pane-btn" aria-label="Add new pane">+</button>
+
+  <div id="add-pane-menu" class="pane-menu hidden">
+    <button class="menu-item" data-type="terminal" data-shortcut="t">
+      <span class="menu-icon"><svg viewBox="0 0 24 24"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm0 2v12h16V6H4zm2 2l4 4-4 4 1.5 1.5L9 12l-5.5-5.5L2 8zm6 8h6v2h-6v-2z"/></svg></span>
+      <span class="menu-label"><span class="shortcut-letter">T</span>erminal</span>
+    </button>
+    <button class="menu-item" data-type="note" data-shortcut="n">
+      <span class="menu-icon"><svg viewBox="0 0 24 24"><path d="M6 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4l2-2 2 2h4a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H6zm0 2h12v16h-3l-3-3-3 3H6V4z"/></svg></span>
+      <span class="menu-label"><span class="shortcut-letter">N</span>ote</span>
+    </button>
+    <button class="menu-item" data-type="file" data-shortcut="f">
+      <span class="menu-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg></span>
+      <span class="menu-label"><span class="shortcut-letter">F</span>ile</span>
+    </button>
+    <button class="menu-item" data-type="git-graph" data-shortcut="g">
+      <span class="menu-icon"><svg viewBox="0 0 24 24"><circle cx="7" cy="6" r="2.5" fill="currentColor"/><circle cx="17" cy="6" r="2.5" fill="currentColor"/><circle cx="7" cy="18" r="2.5" fill="currentColor"/><line x1="7" y1="8.5" x2="7" y2="15.5" stroke="currentColor" stroke-width="2"/><path d="M17 8.5c0 4-10 4-10 7" stroke="currentColor" stroke-width="2" fill="none"/></svg></span>
+      <span class="menu-label"><span class="shortcut-letter">G</span>it Graph</span>
+    </button>
+    <button class="menu-item" data-type="beads" data-shortcut="b">
+      <span class="menu-icon"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="3" fill="currentColor" opacity="0.7"/><circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="18" cy="12" r="3" fill="currentColor" opacity="0.7"/><line x1="9" y1="12" x2="15" y2="12" stroke="currentColor" stroke-width="1.5"/></svg></span>
+      <span class="menu-label"><span class="shortcut-letter">B</span>eads Issues</span>
+    </button>
+    <button class="menu-item" data-type="iframe" data-shortcut="w">
+      <span class="menu-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><line x1="3" y1="12" x2="8" y2="12" stroke="currentColor" stroke-width="2"/><line x1="16" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="2"/><path d="M12 3c-2 3-2 6 0 9s2 6 0 9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></span>
+      <span class="menu-label"><span class="shortcut-letter">W</span>eb Page</span>
+    </button>
+    <button class="menu-item" data-type="folder" data-shortcut="d">
+      <span class="menu-icon"><svg viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z" fill="none" stroke="currentColor" stroke-width="2"/></svg></span>
+      <span class="menu-label"><span class="shortcut-letter">D</span>irectory</span>
+    </button>
+  </div>
+
+  <button id="settings-btn" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+
+  <button id="tutorial-btn" data-tooltip="Tutorials" aria-label="Tutorials">?</button>
+
+  <div id="tutorial-menu" class="tutorial-menu hidden">
+    <div class="tutorial-menu-header">Tutorials</div>
+    <button class="tutorial-menu-item" data-tutorial="getting-started">
+      <span class="tutorial-menu-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></span>
+      <span class="tutorial-menu-label">Getting Started</span>
+      <span class="tutorial-status"></span>
+    </button>
+    <button class="tutorial-menu-item" data-tutorial="panes">
+      <span class="tutorial-menu-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></span>
+      <span class="tutorial-menu-label">Panes & Navigation</span>
+      <span class="tutorial-status"></span>
+    </button>
+    <button class="tutorial-menu-item disabled" data-tutorial="agents" disabled>
+      <span class="tutorial-menu-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4m-9-9h4m14 0h4m-3.3-6.7-2.8 2.8m-9.8 0-2.8-2.8m0 9.8 2.8-2.8m9.8 0 2.8 2.8"/></svg></span>
+      <span class="tutorial-menu-label">Notifications</span>
+      <span class="menu-sublabel">Coming soon</span>
+    </button>
+    <button class="tutorial-menu-item disabled" data-tutorial="workflows" disabled>
+      <span class="tutorial-menu-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></span>
+      <span class="tutorial-menu-label">Git, Beads, Parallel Development</span>
+      <span class="menu-sublabel">Coming soon</span>
+    </button>
+    <button class="tutorial-menu-item disabled" data-tutorial="advanced" disabled>
+      <span class="tutorial-menu-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>
+      <span class="tutorial-menu-label">Advanced Tips from Luka</span>
+      <span class="menu-sublabel">Coming soon</span>
+    </button>
+  </div>
+
+  <div id="controls">
+    <button id="zoom-in" aria-label="Zoom in">+</button>
+    <button id="zoom-out" aria-label="Zoom out">−</button>
+  </div>
+
+  <!-- Monaco Editor from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
+  <script>
+    // Configure Monaco AMD loader
+    require.config({
+      paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs' }
+    });
+
+    // Pre-load Monaco core so editors can be created instantly
+    window.monacoReady = new Promise((resolve) => {
+      require(['vs/editor/editor.main'], function (monaco) {
+        // Define a dark theme matching the app's aesthetic
+        monaco.editor.defineTheme('49agents-dark', {
+          base: 'vs-dark',
+          inherit: true,
+          rules: [
+            { token: 'comment', foreground: '6A9955' },
+            { token: 'keyword', foreground: 'C586C0' },
+            { token: 'string', foreground: 'CE9178' },
+            { token: 'number', foreground: 'B5CEA8' },
+            { token: 'type', foreground: '4EC9B0' },
+          ],
+          colors: {
+            'editor.background': '#00000000',
+            'editor.foreground': '#e0e0e0',
+            'editor.lineHighlightBackground': '#ffffff08',
+            'editor.selectionBackground': '#264f78',
+            'editorCursor.foreground': '#aeafad',
+            'editorLineNumber.foreground': '#ffffff30',
+            'editorLineNumber.activeForeground': '#ffffff60',
+            'editorWidget.background': '#1a1a2ecc',
+            'editorWidget.border': '#ffffff15',
+            'input.background': '#ffffff10',
+            'input.border': '#ffffff15',
+            'scrollbarSlider.background': '#ffffff20',
+            'scrollbarSlider.hoverBackground': '#ffffff30',
+            'scrollbarSlider.activeBackground': '#ffffff40',
+            'minimap.background': '#00000000',
+            'focusBorder': '#00000000',
+            'editor.border': '#00000000',
+          }
+        });
+        monaco.editor.setTheme('49agents-dark');
+        window.monaco = monaco;
+        resolve(monaco);
+      });
+    });
+  </script>
+
+  <!-- Marked.js for markdown preview in notes -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+
+  <script src="themes.min.js"></script>
+  <script src="tutorial.min.js"></script>
+  <script type="module" src="app.min.js"></script>
+  <script src="analytics.min.js" defer></script>
+</body>
+</html>

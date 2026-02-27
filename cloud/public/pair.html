@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>49Agents — Pair Agent</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@200;400;600&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background-color: #050d18;
+      color: #c0c8d8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Subtle animated grid background */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-image:
+        linear-gradient(rgba(99, 102, 241, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99, 102, 241, 0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Radial glow behind the card */
+    body::after {
+      content: '';
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(99, 102, 241, 0.08) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .pair-card {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 460px;
+      padding: 48px 40px;
+      background: rgba(10, 18, 30, 0.85);
+      border: 1px solid rgba(99, 102, 241, 0.15);
+      border-radius: 16px;
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      box-shadow:
+        0 24px 64px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(99, 102, 241, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.03);
+      text-align: center;
+    }
+
+    .logo-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      background: #000;
+      border: 1px solid rgba(0, 240, 255, 0.25);
+      margin-bottom: 16px;
+      box-shadow: 0 0 20px rgba(0, 240, 255, 0.08);
+      overflow: hidden;
+    }
+
+    .logo-icon svg {
+      width: 36px;
+      height: 44px;
+    }
+
+    .title {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 200;
+      font-size: 24px;
+      letter-spacing: 0.5px;
+      color: #e8ecf4;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 300;
+      font-size: 13px;
+      color: #5a6578;
+      letter-spacing: 0.3px;
+      margin-bottom: 32px;
+    }
+
+    .pairing-code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 36px;
+      font-weight: 400;
+      letter-spacing: 8px;
+      color: #8b8ff6;
+      background: rgba(99, 102, 241, 0.08);
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      border-radius: 10px;
+      padding: 16px 24px;
+      margin-bottom: 24px;
+      display: inline-block;
+    }
+
+    .agent-info {
+      margin-bottom: 28px;
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 10px;
+      text-align: left;
+    }
+
+    .agent-info .label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 300;
+      color: #5a6578;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+
+    .agent-info .value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      color: #c0c8d8;
+      margin-bottom: 12px;
+    }
+
+    .agent-info .value:last-child {
+      margin-bottom: 0;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    .btn {
+      flex: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 14px 24px;
+      border: 1px solid;
+      border-radius: 10px;
+      font-family: 'Montserrat', sans-serif;
+      font-size: 15px;
+      font-weight: 400;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-approve {
+      background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(22, 163, 74, 0.2));
+      border-color: rgba(34, 197, 94, 0.4);
+      color: #4ade80;
+    }
+
+    .btn-approve:hover {
+      background: linear-gradient(135deg, rgba(34, 197, 94, 0.3), rgba(22, 163, 74, 0.3));
+      border-color: rgba(34, 197, 94, 0.6);
+      box-shadow: 0 4px 20px rgba(34, 197, 94, 0.15);
+      transform: translateY(-1px);
+    }
+
+    .btn-deny {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(255, 255, 255, 0.1);
+      color: #8892a4;
+    }
+
+    .btn-deny:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.2);
+      color: #c0c8d8;
+      transform: translateY(-1px);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .status-message {
+      margin-top: 20px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 300;
+      display: none;
+    }
+
+    .status-message.success {
+      display: block;
+      background: rgba(34, 197, 94, 0.1);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      color: #4ade80;
+    }
+
+    .status-message.error {
+      display: block;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #f87171;
+    }
+
+    .status-message.loading {
+      display: block;
+      background: rgba(99, 102, 241, 0.1);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      color: #a5b4fc;
+    }
+
+    .no-code {
+      color: #5a6578;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .back-link {
+      display: inline-block;
+      margin-top: 24px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: #5a6578;
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .back-link:hover {
+      color: #8b8ff6;
+    }
+
+    /* Responsive */
+    @media (max-width: 480px) {
+      .pair-card {
+        margin: 16px;
+        padding: 36px 28px;
+      }
+
+      .title {
+        font-size: 20px;
+      }
+
+      .pairing-code {
+        font-size: 28px;
+        letter-spacing: 6px;
+      }
+
+      .btn-row {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="pair-card">
+    <div class="logo-icon">
+      <svg viewBox="0 0 401.25 474.75" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <clipPath id="pa"><path d="M 196 0.316406 L 397 0.316406 L 397 43 L 196 43 Z" clip-rule="nonzero"/></clipPath>
+          <clipPath id="pb"><path d="M 0 160 L 400.5 160 L 400.5 474.183594 L 0 474.183594 Z" clip-rule="nonzero"/></clipPath>
+          <clipPath id="pc"><path d="M 0 163 L 400.5 163 L 400.5 474.183594 L 0 474.183594 Z" clip-rule="nonzero"/></clipPath>
+          <clipPath id="pd"><path d="M 0 0.316406 L 386 0.316406 L 386 355 L 0 355 Z" clip-rule="nonzero"/></clipPath>
+          <clipPath id="pe"><path d="M 0 163 L 400.5 163 L 400.5 474.183594 L 0 474.183594 Z" clip-rule="nonzero"/></clipPath>
+        </defs>
+        <path stroke-linecap="round" transform="matrix(0, -0.748601, 0.748601, 0, 195.64152, 231.206551)" fill="none" stroke-linejoin="miter" d="M 28.50045 28.499897 L 277.235351 28.499897" stroke="#ffffff" stroke-width="57" stroke-miterlimit="4"/>
+        <path stroke-linecap="round" transform="matrix(0, -0.748601, 0.748601, 0, 357.320924, 219.462948)" fill="none" stroke-linejoin="miter" d="M 28.498559 28.500274 L 261.547946 28.500274" stroke="#ffffff" stroke-width="57" stroke-miterlimit="4"/>
+        <g clip-path="url(#pa)"><path stroke-linecap="round" transform="matrix(-0.748601, 0, 0, -0.748601, 396.706561, 42.988328)" fill="none" stroke-linejoin="miter" d="M 28.500464 28.501154 L 238.496423 28.501154" stroke="#ffffff" stroke-width="57" stroke-miterlimit="4"/></g>
+        <path stroke-linecap="round" transform="matrix(-0.748601, 0, 0, -0.748601, 390.074426, 233.078491)" fill="none" stroke-linejoin="miter" d="M 28.501369 28.50158 L 229.626611 28.50158" stroke="#ffffff" stroke-width="57" stroke-miterlimit="4"/>
+        <path stroke-linecap="round" transform="matrix(0, -0.748601, 0.748601, 0, 357.320896, 416.934388)" fill="none" stroke-linejoin="miter" d="M 28.502153 28.500313 L 317.797102 28.500313" stroke="#ffffff" stroke-width="57" stroke-miterlimit="4"/>
+        <g clip-path="url(#pb)"><path stroke-linecap="round" transform="matrix(-0.748557, 0.00806718, -0.00806718, -0.748557, 400.348359, 422.803921)" fill="none" stroke-linejoin="miter" d="M 28.499196 28.500973 L 236.691355 28.500754" stroke="#ffffff" stroke-width="57" stroke-miterlimit="4"/></g>
+        <g clip-path="url(#pc)"><path stroke-linecap="round" transform="matrix(-0.3743, -0.648307, 0.648307, -0.3743, 237.676049, 474.134406)" fill="none" stroke-linejoin="miter" d="M 28.502673 28.500203 L 90.351143 28.502465" stroke="#ffffff" stroke-width="57" stroke-miterlimit="4"/></g>
+        <path stroke-linecap="round" transform="matrix(0, -0.748601, 0.748601, 0, -0.00581417, 299.919264)" fill="none" stroke-linejoin="miter" d="M 28.497604 28.498422 L 369.028771 28.498422" stroke="#ffffff" stroke-width="57" stroke-miterlimit="4"/>
+        <path stroke-linecap="round" transform="matrix(-0.748601, 0, 0, -0.748601, 211.660712, 303.834592)" fill="none" stroke-linejoin="miter" d="M 28.501835 28.499294 L 253.640629 28.499294" stroke="#ffffff" stroke-width="57" stroke-miterlimit="4"/>
+        <path stroke-linecap="round" transform="matrix(0, -0.748601, 0.748601, 0, 124.947249, 420.723458)" fill="none" stroke-linejoin="miter" d="M 28.502162 28.498504 L 404.197894 28.498504" stroke="#ffffff" stroke-width="57" stroke-miterlimit="4"/>
+        <g clip-path="url(#pd)"><path stroke-linecap="round" transform="matrix(-0.3743, -0.648307, 0.648307, -0.3743, 135.951622, 142.759668)" fill="none" stroke-linejoin="miter" d="M 28.497276 28.499817 L 90.352873 28.500169" stroke="#ffffff" stroke-width="57" stroke-miterlimit="4"/></g>
+        <g clip-path="url(#pe)"><path stroke-linecap="round" transform="matrix(-0.3743, -0.648307, 0.648307, -0.3743, 165.050317, 474.134406)" fill="none" stroke-linejoin="miter" d="M 28.502184 28.501049 L 90.353263 28.498793" stroke="#ffffff" stroke-width="57" stroke-miterlimit="4"/></g>
+      </svg>
+    </div>
+
+    <h1 class="title">Approve Agent Pairing</h1>
+    <p class="subtitle">Authorize this machine to connect</p>
+
+    <div id="content">
+      <!-- Populated by JavaScript -->
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const hostname = params.get('hostname') || '';
+    const contentEl = document.getElementById('content');
+
+    if (!code) {
+      contentEl.innerHTML = `
+        <p class="no-code">No pairing code provided.</p>
+        <p class="no-code">Use the link from your agent's terminal output.</p>
+        <a href="/" class="back-link">Back to 49Agents</a>
+      `;
+    } else {
+      // Show the pairing approval UI
+      contentEl.innerHTML = `
+        <div class="pairing-code">${escapeHtml(code)}</div>
+
+        ${hostname ? `
+        <div class="agent-info">
+          <div class="label">Agent Hostname</div>
+          <div class="value">${escapeHtml(hostname)}</div>
+        </div>
+        ` : ''}
+
+        <div class="btn-row">
+          <button class="btn btn-approve" id="approveBtn" onclick="approvePairing()">Approve</button>
+          <button class="btn btn-deny" onclick="window.location.href='/'">Deny</button>
+        </div>
+
+        <div class="status-message" id="status"></div>
+        <a href="/" class="back-link">Back to 49Agents</a>
+      `;
+    }
+
+    async function approvePairing() {
+      const btn = document.getElementById('approveBtn');
+      const statusEl = document.getElementById('status');
+
+      btn.disabled = true;
+      btn.textContent = 'Approving...';
+      statusEl.className = 'status-message loading';
+      statusEl.textContent = 'Registering agent...';
+
+      try {
+        const res = await fetch('/api/agents/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+          credentials: 'include',
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+          statusEl.className = 'status-message success';
+          statusEl.textContent = 'Agent approved successfully! The agent will connect shortly.';
+          btn.style.display = 'none';
+        } else {
+          statusEl.className = 'status-message error';
+          statusEl.textContent = data.error || 'Failed to approve agent.';
+          btn.disabled = false;
+          btn.textContent = 'Retry';
+        }
+      } catch (err) {
+        statusEl.className = 'status-message error';
+        statusEl.textContent = 'Network error. Please try again.';
+        btn.disabled = false;
+        btn.textContent = 'Retry';
+      }
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+  </script>
+  <script src="analytics.min.js" defer></script>
+</body>
+</html>
