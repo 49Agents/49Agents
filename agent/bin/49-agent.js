@@ -30,6 +30,9 @@ switch (command) {
   case 'stop':
     handleStop();
     break;
+  case 'config':
+    await handleConfig();
+    break;
   case 'install-service':
     handleInstallService();
     break;
@@ -96,11 +99,19 @@ async function handleStart() {
   // Foreground mode
   let token = loadToken();
   let cloudUrl;
+
+  // Load saved cloud URL if present (set via `49-agent config`)
+  const cloudUrlFile = join(config.configDir, 'cloud-url');
+  if (existsSync(cloudUrlFile)) {
+    cloudUrl = readFileSync(cloudUrlFile, 'utf-8').trim();
+  }
+
   if (!token) {
-    const result = await promptConnectionMode();
-    if (!result) process.exit(1);
-    token = result.token;
-    cloudUrl = result.cloudUrl;
+    // No token — default to local dev mode, no prompts needed
+    token = 'dev';
+    cloudUrl = cloudUrl || 'ws://localhost:3001';
+    console.log(`[49-agent] No token found — connecting to local server at ${cloudUrl}.`);
+    console.log('[49-agent] To change host/port, run: 49-agent config');
   }
 
   // Write PID file for foreground process too (so status/stop work)
@@ -237,53 +248,41 @@ WantedBy=multi-user.target`;
   }
 }
 
-async function promptConnectionMode() {
+async function handleConfig() {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q) => new Promise((resolve) => rl.question(q, resolve));
 
   console.log('');
-  console.log('No authentication token found.');
+  console.log('49Agents Agent Configuration');
   console.log('');
-  console.log('Where would you like to connect?');
-  console.log('');
-  console.log('  1) Local / private network  (no login required)');
-  console.log('  2) 49agents.com             (not yet available)');
+  console.log('  1) Single machine  (this machine only — default)');
+  console.log('  2) Private network (specify a host on your network)');
   console.log('');
 
-  const answer = (await ask('Enter choice [1/2]: ')).trim();
+  const answer = (await ask('Enter choice [1/2, default: 1]: ')).trim() || '1';
 
-  if (answer === '1') {
-    console.log('');
-    console.log('  1) Single machine  (this machine only — default)');
-    console.log('  2) Private network (specify a host on your network)');
-    console.log('');
-    const machineAnswer = (await ask('Enter choice [1/2, default: 1]: ')).trim() || '1';
-
-    let host = 'localhost';
-    if (machineAnswer === '2') {
-      const hostInput = (await ask('Host or IP of the cloud server: ')).trim();
-      host = hostInput || 'localhost';
-    }
-
-    const portInput = (await ask(`Port the cloud server is running on [default: 3001]: `)).trim();
-    rl.close();
-    const port = portInput || '3001';
-    const cloudUrl = `ws://${host}:${port}`;
-    console.log(`[49-agent] Connecting to ${cloudUrl} in local mode.`);
-    return { token: 'dev', cloudUrl };
+  let host = 'localhost';
+  if (answer === '2') {
+    const hostInput = (await ask('Host or IP of the cloud server: ')).trim();
+    host = hostInput || 'localhost';
   }
 
+  const portInput = (await ask('Port the cloud server is running on [default: 3001]: ')).trim();
   rl.close();
 
-  if (answer === '2') {
-    console.log('');
-    console.log('Cloud mode is not yet available. Please choose option 1 for now :)');
-    console.log('');
-    return null;
-  }
+  const port = portInput || '3001';
+  const cloudUrl = `ws://${host}:${port}`;
 
-  console.error('[49-agent] Invalid choice. Exiting.');
-  return null;
+  // Save as the agent token file with a special dev config marker
+  saveToken('dev');
+  // Persist the chosen cloudUrl via TC_CLOUD_URL hint in config dir
+  mkdirSync(config.configDir, { recursive: true });
+  writeFileSync(join(config.configDir, 'cloud-url'), cloudUrl, 'utf-8');
+
+  console.log('');
+  console.log(`[49-agent] Configured to connect to ${cloudUrl}`);
+  console.log('[49-agent] Run "49-agent start" to connect.');
+  console.log('');
 }
 
 function printHelp() {
@@ -292,15 +291,16 @@ function printHelp() {
 Usage: 49-agent <command> [options]
 
 Commands:
-  login [token]       Store authentication token for cloud relay
-  start               Connect to cloud relay (foreground)
-  start --daemon      Connect to cloud relay (background)
+  start               Connect to local server (foreground) — no login needed
+  start --daemon      Connect to local server (background)
+  config              Set server host/port for private network setups
   status              Show agent status and configuration
   stop                Stop the background agent
+  login [token]       Store a cloud authentication token (future use)
   install-service     Show instructions for system service installation
   help                Show this help message
 
 Environment:
-  TC_CLOUD_URL        Override cloud relay URL (default: wss://49agents.com)
+  TC_CLOUD_URL        Override cloud relay URL (default: ws://localhost:3001)
 `);
 }
