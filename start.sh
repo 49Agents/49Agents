@@ -94,14 +94,16 @@ echo ""
 
 if [ "$RUN_CLOUD" = true ]; then
   echo -e "${YELLOW}Starting cloud server on port ${CLOUD_PORT}...${NC}"
-  PORT="$CLOUD_PORT" (cd cloud && node src/index.js) &
+  export PORT="$CLOUD_PORT"
+  (cd cloud && node src/index.js) &
   CLOUD_PID=$!
   sleep 2
 fi
 
 if [ "$RUN_AGENT" = true ]; then
   echo -e "${YELLOW}Starting agent...${NC}"
-  TC_CLOUD_URL="$AGENT_CLOUD_URL" (cd agent && node bin/49-agent.js start) &
+  export TC_CLOUD_URL="$AGENT_CLOUD_URL"
+  (cd agent && node bin/49-agent.js start) &
   AGENT_PID=$!
 fi
 
