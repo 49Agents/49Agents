@@ -12,10 +12,12 @@ echo -e "${CYAN}${BOLD}49Agents — Setup${NC}"
 echo "──────────────────────────────"
 echo ""
 
-# Install dependencies
+# Install dependencies and build
 echo -e "${YELLOW}Installing dependencies...${NC}"
 (cd cloud && npm install --silent)
 (cd agent && npm install --silent)
+echo -e "${YELLOW}Building client assets...${NC}"
+(cd cloud && npm run build --silent)
 echo -e "${GREEN}Done.${NC}"
 echo ""
 
