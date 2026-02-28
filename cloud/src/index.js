@@ -15,7 +15,6 @@ import { setupLayoutRoutes } from './routes/layouts.js';
 import { setupBillingRoutes, handleStripeWebhook } from './billing/stripe.js';
 import { setupDownloadRoutes } from './routes/download.js';
 import { setupPreferencesRoutes } from './routes/preferences.js';
-import { setupFeedbackRoutes, setChatBrowsers } from './routes/feedback.js';
 import { setupAnalyticsRoutes } from './routes/analytics.js';
 import { setupWebSocketRelay } from './ws/relay.js';
 import { config } from './config.js';
@@ -107,11 +106,6 @@ setupLayoutRoutes(app);
 setupPreferencesRoutes(app);
 
 // ---------------------------------------------------------------------------
-// Feedback routes (webhook forwarding)
-// ---------------------------------------------------------------------------
-setupFeedbackRoutes(app);
-
-// ---------------------------------------------------------------------------
 // Billing routes (checkout, portal, status)
 // ---------------------------------------------------------------------------
 setupBillingRoutes(app);
@@ -195,9 +189,6 @@ function start() {
 
   // Set up the WebSocket relay (handles /ws and /agent-ws upgrade routes)
   const { userAgents, userBrowsers } = setupWebSocketRelay(server, { latestAgentVersion });
-
-  // Wire up chat system with browser WebSocket map for real-time push
-  setChatBrowsers(userBrowsers);
 
   server.listen(config.port, config.host, () => {
     console.log(`[cloud] 49Agents Cloud Server`);

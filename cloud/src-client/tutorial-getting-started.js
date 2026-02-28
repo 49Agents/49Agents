@@ -272,59 +272,6 @@
     hudContainer.classList.remove('tut-above-dim');
     await ctx.sleep(300);
 
-    // ── Step 12: Feedback HUD -- typewriter + send ──
-    ctx.tutDim.classList.add('visible');
-    hudContainer.classList.add('tut-above-dim');
-
-    const feedbackHud = ctx.createFeedbackHud();
-    feedbackHud.style.opacity = '0';
-    feedbackHud.style.transition = 'opacity 0.4s ease';
-    requestAnimationFrame(() => { feedbackHud.style.opacity = '1'; });
-    await ctx.sleep(500);
-
-    ctx.showPrompt('Feedback', 'Send a message to the founder',
-      'Watch the message being typed, then click <span class="hl">Send</span> to deliver it.',
-      11, TOTAL_STEPS);
-
-    // Typewriter effect into textarea
-    const textarea = feedbackHud.querySelector('.chat-textarea');
-    textarea.removeAttribute('readonly');
-    await ctx.typeInto(textarea, 'hey there is some bug in gemini CLI integration...');
-    textarea.setAttribute('readonly', '');
-
-    // Wait for send click
-    const sendBtn = feedbackHud.querySelector('.chat-send-btn');
-    sendBtn.classList.add('tut-glow-purple');
-    await new Promise(resolve => {
-      sendBtn.addEventListener('click', () => {
-        sendBtn.classList.remove('tut-glow-purple');
-        resolve();
-      }, { once: true });
-    });
-
-    // Show the sent message in chat
-    const messagesEl = feedbackHud.querySelector('.chat-messages');
-    const userBubble = document.createElement('div');
-    userBubble.className = 'chat-bubble user';
-    userBubble.innerHTML = '<div class="chat-bubble-body">hey there is some bug in gemini CLI integration...</div><div class="chat-bubble-time">just now</div>';
-    messagesEl.appendChild(userBubble);
-    textarea.value = '';
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-
-    // Admin reply after short delay
-    await ctx.sleep(1200);
-    const adminBubble = document.createElement('div');
-    adminBubble.className = 'chat-bubble admin';
-    adminBubble.innerHTML = '<div class="chat-bubble-body">Just use claude dude\u{1F624}</div><div class="chat-bubble-time">just now</div>';
-    messagesEl.appendChild(adminBubble);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-
-    await ctx.sleep(1500);
-    ctx.hidePrompt();
-    ctx.tutDim.classList.remove('visible');
-    hudContainer.classList.remove('tut-above-dim');
-    await ctx.sleep(300);
-
     await ctx.sleep(500);
 
     // ── Completion ──

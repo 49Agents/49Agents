@@ -2315,8 +2315,7 @@ html, body {
 
 /* Shared collapsed state — uniform height and design for all HUD panes */
 #hud-overlay.collapsed,
-#agents-hud.collapsed,
-#feedback-hud.collapsed {
+#agents-hud.collapsed {
   min-width: 0;
   max-width: 200px;
   cursor: pointer;
@@ -2784,37 +2783,6 @@ html, body {
   flex-direction: column;
   gap: 0;
   margin-top: 6px;
-}
-
-/* === Chat HUD === */
-#feedback-hud {
-  background: rgba(10, 15, 25, 0.85);
-  border: 1px solid rgba(99, 102, 241, 0.2);
-  border-radius: 12px;
-  padding: 10px 12px;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.4),
-    0 0 0 1px rgba(99, 102, 241, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  min-width: 280px;
-  max-width: 380px;
-  pointer-events: auto;
-  cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-#feedback-hud:hover {
-  border-color: rgba(99, 102, 241, 0.4);
-}
-
-#feedback-hud.collapsed .chat-hud-content {
-  display: none;
-}
-
-#feedback-hud.collapsed .chat-hud-header {
-  margin-bottom: 0;
 }
 
 .chat-hud-header {
@@ -3435,10 +3403,6 @@ html, body {
     border-radius: 10px;
   }
 
-  #feedback-hud {
-    min-width: 200px;
-    max-width: 300px;
-  }
 }
 
 /* === Agent Connect Overlay === */

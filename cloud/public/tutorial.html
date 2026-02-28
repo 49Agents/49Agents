@@ -258,9 +258,8 @@
     .tut-file-code::-webkit-scrollbar-track { background: transparent; }
     .tut-file-code::-webkit-scrollbar-thumb { background: rgba(180, 130, 255, 0.45); border-radius: 2px; }
 
-    /* ─── Lift agents-hud / feedback-hud above dim ─── */
-    #agents-hud.tut-above-dim,
-    #feedback-hud.tut-above-dim {
+    /* ─── Lift agents-hud above dim ─── */
+    #agents-hud.tut-above-dim {
       z-index: 99998 !important;
       pointer-events: auto !important;
     }
@@ -1321,46 +1320,6 @@ ${GIT_IND}<span class="${M}">●</span> <span class="${M}">0c8d2f5</span> <span 
             <div class="usage-period">7-day opus</div>
           </div>
           <div class="agents-last-updated" style="font-size:10px;color:#666;margin-top:4px;">Updated just now</div>
-        </div>`;
-
-      container.appendChild(hud);
-      return hud;
-    }
-
-
-    // ═════════════════════════════════════════════════
-    //  FEEDBACK HUD (chat panel)
-    // ═════════════════════════════════════════════════
-
-    function createFeedbackHud() {
-      const container = document.getElementById('hud-container');
-      if (!container) return;
-
-      const hud = document.createElement('div');
-      hud.id = 'feedback-hud';
-      hud.innerHTML = `
-        <div class="hud-header chat-hud-header">
-          <span class="hud-title">Feedback</span>
-        </div>
-        <div class="chat-hud-content">
-          <div class="chat-messages">
-            <div class="chat-bubble user">
-              <div class="chat-bubble-body">The git graph looks amazing! Love the snap-to-edge feature.</div>
-              <div class="chat-bubble-time">2m ago</div>
-            </div>
-            <div class="chat-bubble admin">
-              <div class="chat-bubble-body">Thanks! Let us know if you run into any issues.</div>
-              <div class="chat-bubble-time">1m ago</div>
-            </div>
-          </div>
-          <div class="chat-input-area">
-            <textarea class="chat-textarea" rows="2" maxlength="3000" placeholder="shift + enter to send" readonly></textarea>
-            <div class="chat-input-footer">
-              <span class="chat-char-count"></span>
-              <span class="chat-status"></span>
-              <button class="chat-send-btn">Send</button>
-            </div>
-          </div>
         </div>`;
 
       container.appendChild(hud);
@@ -2485,7 +2444,7 @@ ${GIT_IND}<span class="${M}">●</span> <span class="${M}">0c8d2f5</span> <span 
       showPrompt, hidePrompt, sleep, waitForClick, waitForMenuItemClick, waitForMenuShortcut,
       waitForDrag, waitForResize, waitForZoomOut, enterPlacementMode, enterShiftPlacementMode, typeInto,
       createFakeTerminalPane, createFakeFilePane, createFakeGitGraphPane,
-      createHud, renderHudEmpty, renderHudWithDevice, createUsageHud, createFeedbackHud,
+      createHud, renderHudEmpty, renderHudWithDevice, createUsageHud,
       showMenuItems, showFileBrowserModal, showGitRepoPickerModal,
       updateHudCounts, setZoom,
       // Broadcast helpers

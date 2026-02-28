@@ -34,5 +34,4 @@ export const config = {
   },
   adminUserId: process.env.ADMIN_USER_ID || '',
   nodeEnv: process.env.NODE_ENV || 'development',
-  feedbackWebhookUrl: process.env.FEEDBACK_WEBHOOK_URL || '',
 };

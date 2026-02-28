@@ -431,11 +431,9 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
 
   // Agents HUD state
   let agentsHudExpanded = false;
-  let feedbackHudExpanded = false;
   let hudHidden = false;
   let fleetPaneHidden = false;
   let agentsPaneHidden = false;
-  let feedbackPaneHidden = false;
   let agentsUsageData = null;
   let agentsUsageLastUpdated = null;
   let agentsUsageIntervalId = null;
@@ -519,34 +517,31 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
       // Tab+H restores all panes to visible
       fleetPaneHidden = false;
       agentsPaneHidden = false;
-      feedbackPaneHidden = false;
       if (container) container.style.display = '';
       if (dot) dot.style.display = 'none';
       applyPaneVisibility();
       applyNoHudMode(false);
     }
-    savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded, hud_hidden: hudHidden } });
+    savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, hud_hidden: hudHidden } });
   }
 
   function applyPaneVisibility() {
     const fleet = document.getElementById('hud-overlay');
     const agents = document.getElementById('agents-hud');
-    const feedback = document.getElementById('feedback-hud');
     if (fleet) fleet.style.display = fleetPaneHidden ? 'none' : '';
     if (agents) agents.style.display = agentsPaneHidden ? 'none' : '';
-    if (feedback) feedback.style.display = feedbackPaneHidden ? 'none' : '';
   }
 
   function checkAutoHideHud() {
     // If all panes are individually hidden, auto-collapse to dot
-    if (fleetPaneHidden && agentsPaneHidden && feedbackPaneHidden) {
+    if (fleetPaneHidden && agentsPaneHidden) {
       hudHidden = true;
       const container = document.getElementById('hud-container');
       const dot = document.getElementById('hud-restore-dot');
       if (container) container.style.display = 'none';
       if (dot) dot.style.display = 'block';
       applyNoHudMode(true);
-      savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded, hud_hidden: hudHidden } });
+      savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, hud_hidden: hudHidden } });
     }
   }
 
@@ -603,7 +598,6 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
         hudState: {
           fleet_expanded: hudExpanded,
           agents_expanded: agentsHudExpanded,
-          feedback_expanded: feedbackHudExpanded,
         }
       });
       restartHudPolling();
@@ -857,7 +851,6 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
             hudState: {
               fleet_expanded: hudExpanded,
               agents_expanded: agentsHudExpanded,
-              feedback_expanded: feedbackHudExpanded,
               device_colors: deviceColorOverrides,
             }
           });
@@ -976,236 +969,12 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
         hudState: {
           fleet_expanded: hudExpanded,
           agents_expanded: agentsHudExpanded,
-          feedback_expanded: feedbackHudExpanded,
         }
       });
       renderAgentsHud();
     });
 
     // Polling starts when first agent comes online (see updateAgentsHud)
-  }
-
-  // === Chat HUD ===
-  function createChatHud(container) {
-    const CHAT_MAX_LENGTH = 3000;
-    const CHAT_WARN_THRESHOLD = 2500;
-    let chatLastSentAt = 0;
-    let chatUnreadCount = 0;
-    let chatMessagesLoaded = false;
-
-    const hud = document.createElement('div');
-    hud.id = 'feedback-hud';  // keep ID for CSS backward compat
-    if (!feedbackHudExpanded) hud.classList.add('collapsed');
-    hud.innerHTML = `
-      <div class="hud-header chat-hud-header">
-        <span class="hud-title">Feedback</span>
-        <span class="chat-unread-badge" style="display:none;"></span>
-      </div>
-      <div class="chat-hud-content">
-        <div class="chat-messages"></div>
-        <div class="chat-input-area">
-          <textarea class="chat-textarea" rows="2" maxlength="3000" placeholder="shift + enter to send"></textarea>
-          <div class="chat-input-footer">
-            <span class="chat-char-count"></span>
-            <span class="chat-status"></span>
-            <button class="chat-send-btn">Send</button>
-          </div>
-        </div>
-      </div>
-    `;
-    container.appendChild(hud);
-
-    const content = hud.querySelector('.chat-hud-content');
-    const msgList = hud.querySelector('.chat-messages');
-    const textarea = hud.querySelector('.chat-textarea');
-    const sendBtn = hud.querySelector('.chat-send-btn');
-    const statusEl = hud.querySelector('.chat-status');
-    const charCountEl = hud.querySelector('.chat-char-count');
-    const unreadBadge = hud.querySelector('.chat-unread-badge');
-
-    // Restore draft
-    const savedDraft = localStorage.getItem('tc_feedback_draft');
-    if (savedDraft) textarea.value = savedDraft.substring(0, CHAT_MAX_LENGTH);
-
-    function updateCharCount() {
-      const len = textarea.value.length;
-      if (len >= CHAT_WARN_THRESHOLD) {
-        charCountEl.textContent = `${len} / ${CHAT_MAX_LENGTH}`;
-        charCountEl.style.display = '';
-      } else {
-        charCountEl.textContent = '';
-        charCountEl.style.display = 'none';
-      }
-    }
-
-    function updateBadge() {
-      if (chatUnreadCount > 0) {
-        unreadBadge.textContent = chatUnreadCount > 99 ? '99+' : chatUnreadCount;
-        unreadBadge.style.display = '';
-      } else {
-        unreadBadge.style.display = 'none';
-      }
-    }
-
-    function formatTime(dateStr) {
-      const d = new Date(dateStr + 'Z');  // SQLite dates are UTC without Z
-      const now = new Date();
-      const diff = now - d;
-      if (diff < 60000) return 'now';
-      if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
-      if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
-      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    }
-
-    function appendMessage(msg) {
-      const bubble = document.createElement('div');
-      bubble.className = 'chat-bubble ' + (msg.sender === 'admin' ? 'admin' : 'user');
-      bubble.innerHTML = `
-        <div class="chat-bubble-body">${escapeHtml(msg.body)}</div>
-        <div class="chat-bubble-time">${formatTime(msg.created_at)}</div>
-      `;
-      msgList.appendChild(bubble);
-    }
-
-    function escapeHtml(s) {
-      const div = document.createElement('div');
-      div.textContent = s;
-      return div.innerHTML;
-    }
-
-    async function loadMessages() {
-      try {
-        const data = await cloudFetch('GET', '/api/messages');
-        msgList.innerHTML = '';
-        if (data.messages && data.messages.length > 0) {
-          data.messages.forEach(m => appendMessage(m));
-          msgList.scrollTop = msgList.scrollHeight;
-        } else {
-          msgList.innerHTML = '<div class="chat-empty">No messages yet. Say hello!</div>';
-        }
-        chatUnreadCount = data.unread || 0;
-        updateBadge();
-        chatMessagesLoaded = true;
-        // Mark as read since user is viewing
-        if (chatUnreadCount > 0) {
-          cloudFetch('POST', '/api/messages/mark-read').then(() => {
-            chatUnreadCount = 0;
-            updateBadge();
-          }).catch(() => {});
-        }
-      } catch (e) {
-        console.error('[chat] Failed to load messages:', e);
-      }
-    }
-
-    async function sendMessage() {
-      const message = textarea.value.trim();
-      if (!message) return;
-
-      const now = Date.now();
-      if (now - chatLastSentAt < 10000) {
-        statusEl.textContent = 'Wait 10s';
-        statusEl.className = 'chat-status error';
-        return;
-      }
-
-      sendBtn.disabled = true;
-      statusEl.textContent = '';
-      statusEl.className = 'chat-status';
-
-      try {
-        const resp = await cloudFetch('POST', '/api/messages', { message });
-        chatLastSentAt = Date.now();
-        textarea.value = '';
-        localStorage.removeItem('tc_feedback_draft');
-        updateCharCount();
-        // Append the message we just sent
-        if (resp.message) {
-          // Remove empty placeholder if present
-          const empty = msgList.querySelector('.chat-empty');
-          if (empty) empty.remove();
-          appendMessage(resp.message);
-          msgList.scrollTop = msgList.scrollHeight;
-        }
-      } catch (e) {
-        statusEl.textContent = 'Failed';
-        statusEl.className = 'chat-status error';
-        setTimeout(() => { statusEl.textContent = ''; }, 2000);
-      } finally {
-        sendBtn.disabled = false;
-      }
-    }
-
-    // Save draft on input
-    textarea.addEventListener('input', () => {
-      if (textarea.value.length > CHAT_MAX_LENGTH) {
-        textarea.value = textarea.value.substring(0, CHAT_MAX_LENGTH);
-      }
-      localStorage.setItem('tc_feedback_draft', textarea.value);
-      updateCharCount();
-    });
-
-    // Header click toggles collapse
-    hud.addEventListener('click', (e) => {
-      if (e.target.closest('textarea, button, a, select')) return;
-      feedbackHudExpanded = !feedbackHudExpanded;
-      hud.classList.toggle('collapsed', !feedbackHudExpanded);
-      if (feedbackHudExpanded) {
-        textarea.focus();
-        if (!chatMessagesLoaded) loadMessages();
-        else {
-          // Refresh and mark read
-          loadMessages();
-        }
-      }
-      savePrefsToCloud({
-        hudState: {
-          fleet_expanded: hudExpanded,
-          agents_expanded: agentsHudExpanded,
-          feedback_expanded: feedbackHudExpanded,
-        }
-      });
-    });
-
-    // Send button
-    sendBtn.addEventListener('click', sendMessage);
-
-    // Shift+Enter to send
-    textarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
-
-    updateCharCount();
-
-    // Load messages on startup if expanded
-    if (feedbackHudExpanded) {
-      loadMessages();
-    } else {
-      // Still fetch unread count
-      cloudFetch('GET', '/api/messages/unread-count').then(data => {
-        chatUnreadCount = data.count || 0;
-        updateBadge();
-      }).catch(() => {});
-    }
-
-    // Expose for WebSocket handler
-    window._chatHud = {
-      appendMessage,
-      loadMessages,
-      get isExpanded() { return feedbackHudExpanded; },
-      get unreadCount() { return chatUnreadCount; },
-      set unreadCount(v) { chatUnreadCount = v; updateBadge(); },
-      markRead() {
-        cloudFetch('POST', '/api/messages/mark-read').then(() => {
-          chatUnreadCount = 0;
-          updateBadge();
-        }).catch(() => {});
-      },
-      scrollToBottom() { msgList.scrollTop = msgList.scrollHeight; },
-    };
   }
 
   async function fetchAgentsUsage() {
@@ -1384,7 +1153,6 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
       if (prefs.hudState) {
         hudExpanded = !!prefs.hudState.fleet_expanded;
         agentsHudExpanded = !!prefs.hudState.agents_expanded;
-        feedbackHudExpanded = !!prefs.hudState.feedback_expanded;
         if (prefs.hudState.device_colors) deviceColorOverrides = prefs.hudState.device_colors;
         hudHidden = !!prefs.hudState.hud_hidden;
       }
@@ -1424,7 +1192,6 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
     const hudContainer = createHudContainer();
     createHud(hudContainer);
     createAgentsHud(hudContainer);
-    createChatHud(hudContainer);
     // Apply HUD hidden state from preferences
     if (hudHidden) {
       hudContainer.style.display = 'none';
@@ -2336,24 +2103,6 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
         showUpgradePrompt(payload.message);
         break;
 
-      case 'chat:message':
-        if (window._chatHud) {
-          const chatEl = document.getElementById('feedback-hud');
-          const msgList = chatEl?.querySelector('.chat-messages');
-          if (msgList) {
-            const empty = msgList.querySelector('.chat-empty');
-            if (empty) empty.remove();
-            window._chatHud.appendMessage(payload);
-            window._chatHud.scrollToBottom();
-          }
-          if (!window._chatHud.isExpanded) {
-            window._chatHud.unreadCount = window._chatHud.unreadCount + 1;
-          } else {
-            window._chatHud.markRead();
-          }
-        }
-        break;
-
     }
   }
 
@@ -2665,7 +2414,6 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
           <kbd style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;font-family:inherit;color:#ccc;">Tab A</kbd><span style="color:#9999b8;">Add menu</span>
           <kbd style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;font-family:inherit;color:#ccc;">Tab D</kbd><span style="color:#9999b8;">Toggle fleet pane</span>
           <kbd style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;font-family:inherit;color:#ccc;">Tab U</kbd><span style="color:#9999b8;">Toggle usage pane</span>
-          <kbd style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;font-family:inherit;color:#ccc;">Tab F</kbd><span style="color:#9999b8;">Toggle feedback pane</span>
           <kbd style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;font-family:inherit;color:#ccc;">Tab S</kbd><span style="color:#9999b8;">Settings</span>
           <kbd style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;font-family:inherit;color:#ccc;">Tab W</kbd><span style="color:#9999b8;">Close pane (all if broadcast)</span>
           <kbd style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;font-family:inherit;color:#ccc;">Shift+Click</kbd><span style="color:#9999b8;">Broadcast select</span>
@@ -9657,7 +9405,6 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
           hudHidden = false;
           fleetPaneHidden = false;
           agentsPaneHidden = true;
-          feedbackPaneHidden = true;
           hudExpanded = true;
           const container = document.getElementById('hud-container');
           const dot = document.getElementById('hud-restore-dot');
@@ -9667,10 +9414,10 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
           applyPaneVisibility();
           const hudEl = document.getElementById('hud-overlay');
           if (hudEl) hudEl.classList.remove('collapsed');
-          savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded, hud_hidden: hudHidden } });
+          savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, hud_hidden: hudHidden } });
           restartHudPolling();
           renderHud();
-        } else if (fleetPaneHidden || agentsPaneHidden || feedbackPaneHidden) {
+        } else if (fleetPaneHidden || agentsPaneHidden) {
           // Selective mode: some panes individually hidden
           if (fleetPaneHidden) {
             // Show this pane (expanded)
@@ -9679,7 +9426,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
             applyPaneVisibility();
             const hudEl = document.getElementById('hud-overlay');
             if (hudEl) hudEl.classList.remove('collapsed');
-            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded } });
+            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded } });
             restartHudPolling();
             renderHud();
           } else {
@@ -9694,7 +9441,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
           if (hudEl) {
             hudExpanded = !hudExpanded;
             hudEl.classList.toggle('collapsed', !hudExpanded);
-            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded } });
+            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded } });
             restartHudPolling();
             renderHud();
           }
@@ -9711,7 +9458,6 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
           hudHidden = false;
           fleetPaneHidden = true;
           agentsPaneHidden = false;
-          feedbackPaneHidden = true;
           agentsHudExpanded = true;
           const container = document.getElementById('hud-container');
           const dot = document.getElementById('hud-restore-dot');
@@ -9721,9 +9467,9 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
           applyPaneVisibility();
           const agentsEl = document.getElementById('agents-hud');
           if (agentsEl) agentsEl.classList.remove('collapsed');
-          savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded, hud_hidden: hudHidden } });
+          savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, hud_hidden: hudHidden } });
           renderAgentsHud();
-        } else if (fleetPaneHidden || agentsPaneHidden || feedbackPaneHidden) {
+        } else if (fleetPaneHidden || agentsPaneHidden) {
           // Selective mode
           if (agentsPaneHidden) {
             agentsPaneHidden = false;
@@ -9731,7 +9477,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
             applyPaneVisibility();
             const agentsEl = document.getElementById('agents-hud');
             if (agentsEl) agentsEl.classList.remove('collapsed');
-            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded } });
+            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded } });
             renderAgentsHud();
           } else {
             agentsPaneHidden = true;
@@ -9744,7 +9490,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
           if (agentsEl) {
             agentsHudExpanded = !agentsHudExpanded;
             agentsEl.classList.toggle('collapsed', !agentsHudExpanded);
-            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded } });
+            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded } });
             renderAgentsHud();
           }
         }
@@ -9759,67 +9505,6 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
         return;
       }
 
-      // Tab+F: toggle feedback pane collapse/expand, focus textarea if expanded
-      if (e.key === 'f' && tabHeld) {
-        tabChordUsed = true;
-        e.preventDefault();
-        e.stopPropagation();
-        if (hudHidden) {
-          // From dot mode: unhide HUD, show only chat pane expanded
-          hudHidden = false;
-          fleetPaneHidden = true;
-          agentsPaneHidden = true;
-          feedbackPaneHidden = false;
-          feedbackHudExpanded = true;
-          const container = document.getElementById('hud-container');
-          const dot = document.getElementById('hud-restore-dot');
-          if (container) container.style.display = '';
-          if (dot) dot.style.display = 'none';
-          applyNoHudMode(false);
-          applyPaneVisibility();
-          const feedbackEl = document.getElementById('feedback-hud');
-          if (feedbackEl) {
-            feedbackEl.classList.remove('collapsed');
-            const textarea = feedbackEl.querySelector('.chat-textarea');
-            if (textarea) textarea.focus();
-            if (window._chatHud && window._chatHud.loadMessages) window._chatHud.loadMessages();
-          }
-          savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded, hud_hidden: hudHidden } });
-        } else if (fleetPaneHidden || agentsPaneHidden || feedbackPaneHidden) {
-          // Selective mode
-          if (feedbackPaneHidden) {
-            feedbackPaneHidden = false;
-            feedbackHudExpanded = true;
-            applyPaneVisibility();
-            const feedbackEl = document.getElementById('feedback-hud');
-            if (feedbackEl) {
-              feedbackEl.classList.remove('collapsed');
-              const textarea = feedbackEl.querySelector('.chat-textarea');
-              if (textarea) textarea.focus();
-              if (window._chatHud && window._chatHud.loadMessages) window._chatHud.loadMessages();
-            }
-            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded } });
-          } else {
-            feedbackPaneHidden = true;
-            applyPaneVisibility();
-            checkAutoHideHud();
-          }
-        } else {
-          // Normal mode: toggle collapsed/expanded
-          const feedbackEl = document.getElementById('feedback-hud');
-          if (feedbackEl) {
-            feedbackHudExpanded = !feedbackHudExpanded;
-            feedbackEl.classList.toggle('collapsed', !feedbackHudExpanded);
-            if (feedbackHudExpanded) {
-              const textarea = feedbackEl.querySelector('.chat-textarea');
-              if (textarea) textarea.focus();
-              if (window._chatHud && window._chatHud.loadMessages) window._chatHud.loadMessages();
-            }
-            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded } });
-          }
-        }
-        return;
-      }
       // Tab+S: open settings modal
       if (e.key === 's' && tabHeld) {
         tabChordUsed = true;

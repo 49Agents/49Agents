@@ -39,40 +39,6 @@
     },
     {
       chapter: 1, chapterTitle: 'Welcome & Setup',
-      title: 'Share Feedback',
-      titleBadge: '<kbd>Tab</kbd>+<kbd>F</kbd>',
-      content: `
-        <p>Share feedback, bugs, and get immediate responses from the <strong style="color:#4ec9b0;font-size:15px">founder</strong>.</p>
-        <p>The feedback pane is a direct message with the <strong style="color:#4ec9b0;font-size:15px">founder</strong> — share bugs, comments, ideas, and proposals!</p>
-        <p style="margin-top:12px;padding:10px 14px;background:rgba(78,201,176,0.1);border:1px solid rgba(78,201,176,0.3);border-radius:8px;font-size:13px;">
-          <strong>Try it now:</strong> Type <kbd>hey</kbd> in the feedback chat below and send it!
-        </p>
-      `,
-      target: '#feedback-hud', position: 'right',
-      interactive: true,
-      onEnter: function() {
-        var hud = document.getElementById('feedback-hud');
-        if (hud && hud.classList.contains('collapsed')) {
-          hud.classList.remove('collapsed');
-          hud._tutorialExpanded = true;
-        }
-        // Load messages if not loaded
-        if (window._chatHud && window._chatHud.loadMessages) window._chatHud.loadMessages();
-        // Focus textarea
-        var textarea = hud && hud.querySelector('.chat-textarea');
-        if (textarea) setTimeout(function() { textarea.focus(); }, 300);
-      },
-      onExit: function() {
-        var hud = document.getElementById('feedback-hud');
-        if (hud && hud._tutorialExpanded) {
-          hud.classList.add('collapsed');
-          delete hud._tutorialExpanded;
-        }
-      },
-      waitForMessage: true
-    },
-    {
-      chapter: 1, chapterTitle: 'Welcome & Setup',
       title: 'Connect Your Machine',
       content: `
         <p>To connect a machine, open the <strong>Machines</strong> pane in the HUD on the left side of your screen.</p>
@@ -511,37 +477,6 @@
       else goToStep(nextStart);
     });
     if (closeBtn) closeBtn.addEventListener('click', () => endTutorial(false));
-
-    // Interactive step: disable Next until condition met
-    if (step.interactive && step.waitForMessage && nextBtn) {
-      nextBtn.disabled = true;
-      nextBtn.style.opacity = '0.4';
-      nextBtn.style.cursor = 'not-allowed';
-      nextBtn.textContent = 'Send a message first';
-
-      // Watch for new messages in the feedback HUD chat
-      const msgList = document.querySelector('#feedback-hud .chat-messages');
-      if (msgList) {
-        _messageWatcher = new MutationObserver(function(mutations) {
-          // Check if a user bubble was added
-          for (var i = 0; i < mutations.length; i++) {
-            var added = mutations[i].addedNodes;
-            for (var j = 0; j < added.length; j++) {
-              if (added[j].classList && added[j].classList.contains('chat-bubble') && added[j].classList.contains('user')) {
-                // User sent a message — unlock Next
-                nextBtn.disabled = false;
-                nextBtn.style.opacity = '1';
-                nextBtn.style.cursor = 'pointer';
-                nextBtn.textContent = 'Next';
-                cleanupMessageWatcher();
-                return;
-              }
-            }
-          }
-        });
-        _messageWatcher.observe(msgList, { childList: true });
-      }
-    }
 
     // Save progress
     currentStepIndex = index;
