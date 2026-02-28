@@ -37,7 +37,6 @@ CLOUD_PORT=1071
 AGENT_CLOUD_URL=""
 
 if [ "$SETUP_CHOICE" = "1" ]; then
-  # Single machine — run both
   RUN_CLOUD=true
   RUN_AGENT=true
   read -rp "Port to run the server on [default: 1071]: " PORT_INPUT
@@ -79,6 +78,81 @@ elif [ "$SETUP_CHOICE" = "2" ]; then
 else
   echo "Invalid choice. Exiting."
   exit 1
+fi
+
+# ── Check/install tmux and ttyd (only if agent is running) ───
+install_tmux() {
+  echo ""
+  read -rp "tmux is required for the agent. Install it now? [Y/n]: " CONFIRM
+  CONFIRM="${CONFIRM:-Y}"
+  if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
+    if [ "$OS" = "mac" ]; then
+      brew install tmux
+    elif command -v apt-get &>/dev/null; then
+      sudo apt-get install -y tmux
+    elif command -v dnf &>/dev/null; then
+      sudo dnf install -y tmux
+    elif command -v yum &>/dev/null; then
+      sudo yum install -y tmux
+    elif command -v pacman &>/dev/null; then
+      sudo pacman -S --noconfirm tmux
+    else
+      echo "Could not detect package manager. Please install tmux manually."
+      exit 1
+    fi
+  else
+    echo "tmux is required. Exiting."
+    exit 1
+  fi
+}
+
+install_ttyd() {
+  echo ""
+  read -rp "ttyd is required for the agent. Install it now? [Y/n]: " CONFIRM
+  CONFIRM="${CONFIRM:-Y}"
+  if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
+    if [ "$OS" = "mac" ]; then
+      brew install ttyd
+    else
+      # Download static binary from GitHub releases
+      ARCH=$(uname -m)
+      if [ "$ARCH" = "x86_64" ]; then
+        TTYD_BINARY="ttyd.x86_64"
+      elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+        TTYD_BINARY="ttyd.aarch64"
+      else
+        echo "Unsupported architecture: $ARCH. Please install ttyd manually from https://github.com/tsl0922/ttyd/releases"
+        exit 1
+      fi
+      TTYD_VERSION=$(curl -s https://api.github.com/repos/tsl0922/ttyd/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+      echo "Downloading ttyd ${TTYD_VERSION}..."
+      sudo curl -fsSL "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/${TTYD_BINARY}" -o /usr/local/bin/ttyd
+      sudo chmod +x /usr/local/bin/ttyd
+    fi
+  else
+    echo "ttyd is required. Exiting."
+    exit 1
+  fi
+}
+
+if [ "$RUN_AGENT" = true ]; then
+  # Detect OS
+  if [ "$(uname)" = "Darwin" ]; then
+    OS="mac"
+  else
+    OS="linux"
+  fi
+
+  if ! command -v tmux &>/dev/null; then
+    install_tmux
+  fi
+
+  if ! command -v ttyd &>/dev/null; then
+    install_ttyd
+  fi
+
+  echo -e "${GREEN}tmux and ttyd are ready.${NC}"
+  echo ""
 fi
 
 # ── Cleanup on exit ──────────────────────────────────────────
