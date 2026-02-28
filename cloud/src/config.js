@@ -1,16 +1,16 @@
 export const config = {
-  port: parseInt(process.env.PORT || '3001'),
+  port: parseInt(process.env.PORT || '1071'),
   host: process.env.HOST || '0.0.0.0',
   dbPath: process.env.DATABASE_PATH || './data/tc.db',
   github: {
     clientId: process.env.GITHUB_CLIENT_ID || '',
     clientSecret: process.env.GITHUB_CLIENT_SECRET || '',
-    callbackUrl: process.env.GITHUB_CALLBACK_URL || 'http://localhost:3001/auth/github/callback',
+    callbackUrl: process.env.GITHUB_CALLBACK_URL || 'http://localhost:1071/auth/github/callback',
   },
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID || '',
     clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
-    callbackUrl: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3001/auth/google/callback',
+    callbackUrl: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:1071/auth/google/callback',
   },
   jwt: {
     secret: process.env.JWT_SECRET || 'dev-secret-change-in-production',
@@ -26,7 +26,7 @@ export const config = {
     successUrl: process.env.STRIPE_SUCCESS_URL || '/',
     cancelUrl: process.env.STRIPE_CANCEL_URL || '/',
   },
-  cloudHost: process.env.CLOUD_HOST || 'localhost:3001',
+  cloudHost: process.env.CLOUD_HOST || 'localhost:1071',
   appHost: process.env.APP_HOST || '',
   landingDir: process.env.LANDING_DIR || '',
   discord: {

@@ -16,7 +16,7 @@ try {
 }
 
 export const config = {
-  cloudUrl: process.env.TC_CLOUD_URL || 'wss://49agents.com',
+  cloudUrl: process.env.TC_CLOUD_URL || 'ws://localhost:1071',
   configDir: join(homedir(), '.49agents'),
   dataDir: join(homedir(), '.49agents'),
   version,

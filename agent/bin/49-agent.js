@@ -109,7 +109,7 @@ async function handleStart() {
   if (!token) {
     // No token — default to local dev mode, no prompts needed
     token = 'dev';
-    cloudUrl = cloudUrl || 'ws://localhost:3001';
+    cloudUrl = cloudUrl || 'ws://localhost:1071';
     console.log(`[49-agent] No token found — connecting to local server at ${cloudUrl}.`);
     console.log('[49-agent] To change host/port, run: 49-agent config');
   }
@@ -301,6 +301,6 @@ Commands:
   help                Show this help message
 
 Environment:
-  TC_CLOUD_URL        Override cloud relay URL (default: ws://localhost:3001)
+  TC_CLOUD_URL        Override cloud relay URL (default: ws://localhost:1071)
 `);
 }
