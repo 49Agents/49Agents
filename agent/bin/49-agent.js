@@ -100,10 +100,14 @@ async function handleStart() {
   let token = loadToken();
   let cloudUrl;
 
-  // Load saved cloud URL if present (set via `49-agent config`)
-  const cloudUrlFile = join(config.configDir, 'cloud-url');
-  if (existsSync(cloudUrlFile)) {
-    cloudUrl = readFileSync(cloudUrlFile, 'utf-8').trim();
+  // Priority: TC_CLOUD_URL env var > saved cloud-url file > default
+  if (process.env.TC_CLOUD_URL) {
+    cloudUrl = process.env.TC_CLOUD_URL;
+  } else {
+    const cloudUrlFile = join(config.configDir, 'cloud-url');
+    if (existsSync(cloudUrlFile)) {
+      cloudUrl = readFileSync(cloudUrlFile, 'utf-8').trim();
+    }
   }
 
   if (!token) {

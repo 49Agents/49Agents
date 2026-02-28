@@ -97,7 +97,7 @@ if [ "$RUN_CLOUD" = true ]; then
   export PORT="$CLOUD_PORT"
   (cd cloud && node src/index.js) &
   CLOUD_PID=$!
-  sleep 2
+  sleep 4
 fi
 
 if [ "$RUN_AGENT" = true ]; then
