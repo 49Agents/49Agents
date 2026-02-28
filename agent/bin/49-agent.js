@@ -253,10 +253,22 @@ async function promptConnectionMode() {
   const answer = (await ask('Enter choice [1/2]: ')).trim();
 
   if (answer === '1') {
-    const portInput = (await ask('Port the cloud server is running on [default: 3001]: ')).trim();
+    console.log('');
+    console.log('  1) Single machine  (this machine only — default)');
+    console.log('  2) Private network (specify a host on your network)');
+    console.log('');
+    const machineAnswer = (await ask('Enter choice [1/2, default: 1]: ')).trim() || '1';
+
+    let host = 'localhost';
+    if (machineAnswer === '2') {
+      const hostInput = (await ask('Host or IP of the cloud server: ')).trim();
+      host = hostInput || 'localhost';
+    }
+
+    const portInput = (await ask(`Port the cloud server is running on [default: 3001]: `)).trim();
     rl.close();
     const port = portInput || '3001';
-    const cloudUrl = `ws://localhost:${port}`;
+    const cloudUrl = `ws://${host}:${port}`;
     console.log(`[49-agent] Connecting to ${cloudUrl} in local mode.`);
     return { token: 'dev', cloudUrl };
   }
