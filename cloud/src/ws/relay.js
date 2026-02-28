@@ -108,10 +108,12 @@ export function setupWebSocketRelay(server, options = {}) {
     if (url.pathname === '/ws') {
       // Browser WS -- authenticate via JWT cookie (or dev mode bypass)
       try {
-        let userId = await authenticateBrowserUpgrade(request);
+        let userId;
 
-        // Dev mode: auto-create dev user if no auth
-        if (!userId && !config.github.clientId) {
+        // Dev mode: always use the dev user — skip cookie auth entirely so
+        // stale cookies from previous sessions don't cause a userId mismatch
+        // with the agent (which also resolves to the same dev user).
+        if (!config.github.clientId) {
           const devUser = upsertUser({
             githubId: 'dev-0',
             githubLogin: 'dev-user',
@@ -120,6 +122,8 @@ export function setupWebSocketRelay(server, options = {}) {
             avatarUrl: null,
           });
           userId = devUser.id;
+        } else {
+          userId = await authenticateBrowserUpgrade(request);
         }
 
         if (!userId) {
