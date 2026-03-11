@@ -58,7 +58,7 @@ function getFeaturesForTier(tier) {
  */
 function buildUserResponse(user, agents) {
   const features = getFeaturesForTier(user.tier);
-  return {
+  const resp = {
     id: user.id,
     email: user.email,
     name: user.display_name || user.github_login || user.email,
@@ -74,6 +74,11 @@ function buildUserResponse(user, agents) {
       lastSeen: a.last_seen_at,
     })),
   };
+  if (user.is_guest) {
+    resp.isGuest = true;
+    resp.guestStartedAt = user.guest_started_at;
+  }
+  return resp;
 }
 
 /**

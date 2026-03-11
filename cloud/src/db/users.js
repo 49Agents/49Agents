@@ -106,3 +106,46 @@ export function updateUserTier(userId, tier) {
     UPDATE users SET tier = ?, updated_at = datetime('now') WHERE id = ?
   `).run(tier, userId);
 }
+
+/**
+ * Create a guest user (no OAuth, temporary).
+ * Guests get the default tier and a 30-minute session window.
+ */
+export function createGuestUser() {
+  const db = getDb();
+  const id = generateUserId();
+  db.prepare(`
+    INSERT INTO users (id, is_guest, guest_started_at, display_name, tier)
+    VALUES (?, 1, datetime('now'), 'Guest', ?)
+  `).run(id, DEFAULT_TIER);
+
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+
+  recordEvent('user.guest_start', id, {});
+  notifyNewUser(user).catch(err => console.warn('[discord] Unhandled:', err.message));
+
+  return user;
+}
+
+/**
+ * Transfer guest data to a real user account and delete the guest.
+ * Reassigns all foreign-keyed rows from guestId to realUserId.
+ */
+export function transferGuestData(guestId, realUserId) {
+  const db = getDb();
+
+  // Tables that reference users(id) — transfer ownership
+  const tables = ['agents', 'terminals', 'notes', 'user_preferences', 'file_panes', 'git_graphs', 'iframes', 'beads_panes', 'folder_panes', 'messages'];
+  for (const table of tables) {
+    try {
+      db.prepare(`UPDATE ${table} SET user_id = ? WHERE user_id = ?`).run(realUserId, guestId);
+    } catch (e) {
+      // Table may not exist — skip silently
+    }
+  }
+
+  // Delete the guest user row
+  db.prepare('DELETE FROM users WHERE id = ?').run(guestId);
+
+  recordEvent('user.guest_converted', realUserId, { from_guest: guestId });
+}

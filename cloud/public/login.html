@@ -272,6 +272,16 @@
       Sign in with Google
     </a>
 
+    <div class="divider">or</div>
+
+    <button id="guest-btn" class="oauth-btn guest-btn" style="display:none;">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+        <circle cx="12" cy="7" r="4"/>
+      </svg>
+      Continue as Guest
+    </button>
+
     <p class="footer-text">Secure authentication via OAuth</p>
   </div>
 
@@ -299,6 +309,52 @@
       background: rgba(99, 102, 241, 0.05);
     }
   </style>
+  <style>
+    .guest-btn {
+      background: transparent !important;
+      border-color: rgba(255, 255, 255, 0.06) !important;
+      color: #5a6578 !important;
+      font-size: 13px !important;
+    }
+    .guest-btn:hover {
+      color: #8b8ff6 !important;
+      border-color: rgba(99, 102, 241, 0.25) !important;
+      background: rgba(99, 102, 241, 0.05) !important;
+      box-shadow: none !important;
+    }
+  </style>
+  <script>
+    // Show guest button only when OAuth is configured (production)
+    // If OAuth buttons are present (href not 503), show the guest option
+    (function() {
+      const ghBtn = document.querySelector('a[href="/auth/github"]');
+      const googleBtn = document.querySelector('a[href="/auth/google"]');
+      if (ghBtn || googleBtn) {
+        const guestBtn = document.getElementById('guest-btn');
+        if (guestBtn) guestBtn.style.display = 'inline-flex';
+      }
+      document.getElementById('guest-btn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('guest-btn');
+        btn.disabled = true;
+        btn.textContent = 'Starting...';
+        try {
+          const res = await fetch('/auth/guest', { method: 'POST', credentials: 'include' });
+          if (res.ok) {
+            window.location.href = '/';
+          } else {
+            const data = await res.json().catch(() => ({}));
+            btn.textContent = data.error || 'Failed — try again';
+            btn.disabled = false;
+            setTimeout(() => { btn.textContent = 'Continue as Guest'; }, 3000);
+          }
+        } catch (e) {
+          btn.textContent = 'Network error';
+          btn.disabled = false;
+          setTimeout(() => { btn.textContent = 'Continue as Guest'; }, 3000);
+        }
+      });
+    })();
+  </script>
   <script src="analytics.min.js" defer></script>
 </body>
 </html>

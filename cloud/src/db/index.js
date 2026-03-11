@@ -114,6 +114,14 @@ export function initDatabase() {
     db.prepare("ALTER TABLE users ADD COLUMN utm_source TEXT").run();
   } catch (e) { /* already exists */ }
 
+  // Migration: guest mode columns on users
+  try {
+    db.prepare("ALTER TABLE users ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 0").run();
+  } catch (e) { /* already exists */ }
+  try {
+    db.prepare("ALTER TABLE users ADD COLUMN guest_started_at TEXT").run();
+  } catch (e) { /* already exists */ }
+
   console.log(`[db] SQLite database initialized at ${config.dbPath}`);
   return db;
 }

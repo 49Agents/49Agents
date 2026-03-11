@@ -4,9 +4,9 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 import { Google, generateCodeVerifier } from 'arctic';
 import { nanoid } from 'nanoid';
 import { config } from '../config.js';
-import { upsertUser } from '../db/users.js';
+import { upsertUser, getUserById, transferGuestData } from '../db/users.js';
 import { recordEvent } from '../db/events.js';
-import { issueAccessToken, issueRefreshToken, setAuthCookies } from './github.js';
+import { issueAccessToken, issueRefreshToken, setAuthCookies, getSecretKey } from './github.js';
 
 // Lazily initialize the Google OAuth client — only when credentials are present
 let google = null;
@@ -112,6 +112,26 @@ export function setupGoogleAuth(app) {
 
       // Clear the UTM cookie after use
       if (utmSource) res.clearCookie('_49a_utm', { path: '/' });
+
+      // Transfer guest data if this user was previously a guest
+      try {
+        const oldAccessToken = req.cookies?.tc_access;
+        if (oldAccessToken) {
+          const { jwtVerify } = await import('jose');
+          try {
+            const { payload } = await jwtVerify(oldAccessToken, getSecretKey());
+            const oldUser = getUserById(payload.sub);
+            if (oldUser && oldUser.is_guest && oldUser.id !== user.id) {
+              transferGuestData(oldUser.id, user.id);
+              console.log(`[auth] Transferred guest data: ${oldUser.id} -> ${user.id}`);
+            }
+          } catch (e) {
+            // Token invalid — no guest to transfer
+          }
+        }
+      } catch (e) {
+        console.warn('[auth] Guest transfer check failed:', e.message);
+      }
 
       console.log(`[auth] User authenticated via Google: ${user.email || user.display_name} (${user.id})`);
       recordEvent('user.login', user.id, { provider: 'google', email: user.email });

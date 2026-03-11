@@ -2,7 +2,7 @@ import { GitHub } from 'arctic';
 import { SignJWT } from 'jose';
 import { nanoid } from 'nanoid';
 import { config } from '../config.js';
-import { upsertUser } from '../db/users.js';
+import { upsertUser, createGuestUser, transferGuestData, getUserById } from '../db/users.js';
 import { recordEvent } from '../db/events.js';
 
 // Lazily initialize the GitHub OAuth client — only when credentials are present
@@ -92,6 +92,25 @@ function clearAuthCookies(res) {
  * Register GitHub OAuth routes on the Express app.
  */
 export function setupGitHubAuth(app) {
+  // POST /auth/guest — create a guest session (only when OAuth is enabled)
+  app.post('/auth/guest', async (req, res) => {
+    const hasOAuth = !!(config.github.clientId || config.google.clientId);
+    if (!hasOAuth) {
+      return res.status(400).json({ error: 'Guest mode not available (no OAuth configured)' });
+    }
+
+    try {
+      const guest = createGuestUser();
+      const jwtAccess = await issueAccessToken(guest);
+      const jwtRefresh = await issueRefreshToken(guest);
+      setAuthCookies(res, jwtAccess, jwtRefresh);
+      res.json({ ok: true, userId: guest.id });
+    } catch (err) {
+      console.error('[auth] Guest creation error:', err);
+      res.status(500).json({ error: 'Failed to create guest session' });
+    }
+  });
+
   // GET /auth/github — redirect to GitHub OAuth
   app.get('/auth/github', (req, res) => {
     const gh = getGitHub();
@@ -194,6 +213,26 @@ export function setupGitHubAuth(app) {
 
       // Clear the UTM cookie after use
       if (utmSource) res.clearCookie('_49a_utm', { path: '/' });
+
+      // Transfer guest data if this user was previously a guest
+      try {
+        const oldAccessToken = req.cookies?.tc_access;
+        if (oldAccessToken) {
+          const { jwtVerify } = await import('jose');
+          try {
+            const { payload } = await jwtVerify(oldAccessToken, getSecretKey());
+            const oldUser = getUserById(payload.sub);
+            if (oldUser && oldUser.is_guest && oldUser.id !== user.id) {
+              transferGuestData(oldUser.id, user.id);
+              console.log(`[auth] Transferred guest data: ${oldUser.id} -> ${user.id}`);
+            }
+          } catch (e) {
+            // Token invalid — no guest to transfer, that's fine
+          }
+        }
+      } catch (e) {
+        console.warn('[auth] Guest transfer check failed:', e.message);
+      }
 
       console.log(`[auth] User authenticated: ${user.github_login} (${user.id})`);
       recordEvent('user.login', user.id, { provider: 'github', login: user.github_login });

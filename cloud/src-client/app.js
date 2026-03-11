@@ -819,6 +819,8 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
     const addBtn = content.querySelector('.add-machine-fleet-btn');
     if (addBtn) {
       addBtn.addEventListener('click', showAddMachineDialog);
+      // Apply pulse animation if no agents are online
+      if (window.__pulseAddMachine) addBtn.classList.add('pulsing');
       if (fleetEmpty) {
         // Filled button style for empty fleet
         addBtn.addEventListener('mouseenter', () => { addBtn.style.opacity = '0.8'; });
@@ -1110,6 +1112,98 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
 
 
   // Initialize
+  // === Guest Mode: Nudge & Forced Registration ===
+  let guestNudgeTimer = null;
+  let guestForceTimer = null;
+  let guestNudgeInterval = null;
+  const GUEST_HARD_LIMIT_MS = 30 * 60 * 1000;       // 30 minutes
+  const GUEST_SOFT_LIMIT_MS = 15 * 60 * 1000;        // 15 min + 5 panes
+  const GUEST_SOFT_PANE_THRESHOLD = 5;
+  const GUEST_NUDGE_INTERVAL_MS = 15 * 60 * 1000;    // remind every 15 min
+
+  function showGuestRegisterModal(force) {
+    let overlay = document.getElementById('guest-register-overlay');
+    if (overlay) overlay.remove();
+
+    overlay = document.createElement('div');
+    overlay.id = 'guest-register-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:200000;';
+
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#1a1a2e;border:1px solid #8b8ff6;border-radius:14px;padding:36px;max-width:440px;width:90%;color:#e0e0e0;font-family:Montserrat,sans-serif;text-align:center;';
+
+    const title = force ? 'Guest Session Expired' : 'Create Your Account';
+    const msg = force
+      ? 'Your guest session has reached its limit. Sign up to keep your work and continue using 49Agents.'
+      : 'Sign up to save your work permanently and unlock all features.';
+    const dismissBtn = force
+      ? ''
+      : `<button id="guest-dismiss-btn" style="background:transparent;color:#5a6578;border:1px solid rgba(255,255,255,0.1);padding:10px 24px;border-radius:8px;cursor:pointer;font-family:monospace;font-size:13px;">Maybe Later</button>`;
+
+    card.innerHTML = `
+      <h2 style="margin:0 0 12px;color:#8b8ff6;font-size:20px;font-weight:600;">${title}</h2>
+      <p style="color:#8a8faa;margin:0 0 24px;font-size:14px;line-height:1.5;">${msg}</p>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
+        <a href="/auth/github" style="display:inline-flex;align-items:center;justify-content:center;gap:10px;padding:12px 20px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);border-radius:8px;color:#e8ecf4;text-decoration:none;font-size:14px;transition:all 0.2s;">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          Sign up with GitHub
+        </a>
+        <a href="/auth/google" style="display:inline-flex;align-items:center;justify-content:center;gap:10px;padding:12px 20px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);border-radius:8px;color:#e8ecf4;text-decoration:none;font-size:14px;transition:all 0.2s;">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+          Sign up with Google
+        </a>
+      </div>
+      ${dismissBtn}
+    `;
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    // Force mode: block all interaction (no dismiss)
+    if (force) return;
+
+    // Dismiss button
+    const dismissEl = document.getElementById('guest-dismiss-btn');
+    if (dismissEl) {
+      dismissEl.addEventListener('click', () => overlay.remove());
+    }
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  }
+
+  function initGuestNudge(user) {
+    if (!user.isGuest) return;
+
+    const startedAt = new Date(user.guestStartedAt).getTime();
+    const elapsed = Date.now() - startedAt;
+    const remaining = GUEST_HARD_LIMIT_MS - elapsed;
+
+    // Hard limit: force registration after 30 min total
+    if (remaining <= 0) {
+      showGuestRegisterModal(true);
+      return;
+    }
+    guestForceTimer = setTimeout(() => showGuestRegisterModal(true), remaining);
+
+    // Soft limit check: 5+ panes AND 15 min elapsed
+    guestNudgeInterval = setInterval(() => {
+      const now = Date.now();
+      const elapsedNow = now - startedAt;
+      if (elapsedNow >= GUEST_SOFT_LIMIT_MS && state.panes.length >= GUEST_SOFT_PANE_THRESHOLD) {
+        showGuestRegisterModal(true);
+        clearInterval(guestNudgeInterval);
+        clearTimeout(guestForceTimer);
+      }
+    }, 30000); // check every 30s
+
+    // Periodic nudge every 15 min (non-blocking)
+    const firstNudgeIn = Math.max(GUEST_NUDGE_INTERVAL_MS - elapsed, 60000);
+    guestNudgeTimer = setTimeout(function nudge() {
+      const user = window.__tcUser;
+      if (!user || !user.isGuest) return;
+      showGuestRegisterModal(false);
+      guestNudgeTimer = setTimeout(nudge, GUEST_NUDGE_INTERVAL_MS);
+    }, firstNudgeIn);
+  }
+
   async function init() {
 
     // Auth check
@@ -1122,6 +1216,11 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
       const currentUser = await authRes.json();
       // Store user info for tier gating later
       window.__tcUser = currentUser;
+
+      // Start guest nudge timers if this is a guest session
+      if (currentUser.isGuest) {
+        initGuestNudge(currentUser);
+      }
     } catch (e) {
       // If auth check fails, continue anyway (might be local dev mode)
       console.warn('[App] Auth check failed:', e);
@@ -2809,77 +2908,55 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
     }
 
     if (!hasOnlineAgents) {
-      if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'agent-connect-overlay';
-        overlay.innerHTML = `
-          <div class="agent-connect-card">
-            <h2>Connect Your Machine</h2>
-            <p>Copy the command below and paste it on your machine:</p>
-            <div id="overlay-platform-toggle" style="display:flex;gap:0;margin:12px 0;">
-              <button data-platform="linux" style="flex:1;padding:8px;background:#4ec9b0;color:#0a0a1a;border:1px solid #4ec9b0;border-radius:4px 0 0 4px;cursor:pointer;font-family:monospace;font-size:12px;font-weight:bold;">Linux / macOS</button>
-              <button data-platform="windows" style="flex:1;padding:8px;background:transparent;color:#6a6a8a;border:1px solid #333;border-radius:0 4px 4px 0;cursor:pointer;font-family:monospace;font-size:12px;">Windows (WSL2)</button>
-            </div>
-            <div id="install-cmd-box" style="position:relative;margin:12px 0;">
-              <code id="install-cmd" style="display:block;padding:12px;background:#0a0a1a;border-radius:6px;word-break:break-all;font-size:11px;cursor:pointer;user-select:all;opacity:0.5;">Generating...</code>
-              <button id="install-cmd-copy" style="position:absolute;top:4px;right:4px;background:#4ec9b0;color:#0a0a1a;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-family:monospace;display:none;">Copy</button>
-            </div>
-            <p class="agent-connect-hint">Waiting for agent connection...</p>
-          </div>
-        `;
-        document.body.appendChild(overlay);
-
-        let overlayPlatform = 'linux';
-        async function overlayGenerateCmd() {
-          const cmdEl = document.getElementById('install-cmd');
-          const copyBtn = document.getElementById('install-cmd-copy');
-          cmdEl.textContent = 'Generating...';
-          cmdEl.style.opacity = '0.5';
-          copyBtn.style.display = 'none';
-          try {
-            const hostname = 'machine-' + Date.now().toString(36);
-            const cmd = await fetchInstallCommand(hostname, overlayPlatform);
-            cmdEl.textContent = cmd;
-            cmdEl.style.opacity = '1';
-            copyBtn.style.display = 'block';
-          } catch (e) {
-            cmdEl.textContent = 'Error: ' + (e.message || 'try again');
-            cmdEl.style.opacity = '1';
-          }
-        }
-
-        const overlayPlatformBtns = document.querySelectorAll('#overlay-platform-toggle button');
-        overlayPlatformBtns.forEach(btn => {
-          btn.addEventListener('click', () => {
-            overlayPlatform = btn.dataset.platform;
-            overlayPlatformBtns.forEach(b => {
-              if (b.dataset.platform === overlayPlatform) {
-                b.style.background = '#4ec9b0'; b.style.color = '#0a0a1a'; b.style.borderColor = '#4ec9b0'; b.style.fontWeight = 'bold';
-              } else {
-                b.style.background = 'transparent'; b.style.color = '#6a6a8a'; b.style.borderColor = '#333'; b.style.fontWeight = 'normal';
-              }
-            });
-            overlayGenerateCmd();
-          });
-        });
-
-        // Auto-generate immediately
-        overlayGenerateCmd();
-
-        document.getElementById('install-cmd-copy').addEventListener('click', () => {
-          const cmd = document.getElementById('install-cmd').textContent;
-          navigator.clipboard.writeText(cmd).then(() => {
-            const copyBtn = document.getElementById('install-cmd-copy');
-            copyBtn.textContent = 'Copied!';
-            setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
-          });
-        });
-      }
-      overlay.style.display = 'flex';
+      // Instead of auto-popup overlay, highlight the HUD add-machine button
+      if (overlay) overlay.style.display = 'none';
+      pulseAddMachineButton(true);
     } else {
       if (overlay) {
         overlay.style.display = 'none';
       }
+      pulseAddMachineButton(false);
+    }
+  }
+
+  // Inject pulse animation style once
+  let pulseStyleInjected = false;
+  function injectPulseStyle() {
+    if (pulseStyleInjected) return;
+    pulseStyleInjected = true;
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes addMachinePulse {
+        0% { box-shadow: 0 0 4px rgba(78, 201, 176, 0.4), 0 0 8px rgba(78, 201, 176, 0.2); }
+        50% { box-shadow: 0 0 12px rgba(78, 201, 176, 0.7), 0 0 24px rgba(78, 201, 176, 0.3); }
+        100% { box-shadow: 0 0 4px rgba(78, 201, 176, 0.4), 0 0 8px rgba(78, 201, 176, 0.2); }
+      }
+      .add-machine-fleet-btn.pulsing {
+        animation: addMachinePulse 2s ease-in-out infinite !important;
+        background: #4ec9b0 !important;
+        border: 1px solid rgba(78, 201, 176, 0.6) !important;
+        font-weight: 700 !important;
+        transform: scale(1.02);
+        transition: transform 0.2s ease;
+      }
+      .add-machine-fleet-btn.pulsing:hover {
+        transform: scale(1.06);
+        animation: none !important;
+        box-shadow: 0 0 16px rgba(78, 201, 176, 0.8), 0 0 32px rgba(78, 201, 176, 0.4) !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function pulseAddMachineButton(enable) {
+    if (enable) injectPulseStyle();
+    // The HUD fleet button gets re-rendered, so we set a flag and apply in renderHud
+    window.__pulseAddMachine = enable;
+    // Also apply immediately if the button exists
+    const btn = document.querySelector('.add-machine-fleet-btn');
+    if (btn) {
+      if (enable) btn.classList.add('pulsing');
+      else btn.classList.remove('pulsing');
     }
   }
 
