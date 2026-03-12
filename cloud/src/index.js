@@ -31,10 +31,20 @@ const app = express();
 // and only APP_HOST gets the actual app.
 // ---------------------------------------------------------------------------
 if (landingDir && config.appHost) {
+  // Vanity redirect paths — redirect to landing page root with utm_source
+  const vanityRedirects = { '/twitter': 'twitter', '/x': 'twitter', '/github': 'github', '/reddit': 'reddit', '/hn': 'hackernews', '/hackernews': 'hackernews', '/linkedin': 'linkedin', '/youtube': 'youtube', '/yt': 'youtube', '/discord': 'discord' };
+
   app.use((req, res, next) => {
     const host = req.hostname;
     // If this is the app subdomain, continue to the app
     if (host === config.appHost) return next();
+
+    // Vanity redirects: /twitter -> /?utm_source=twitter
+    const source = vanityRedirects[req.path.toLowerCase()];
+    if (source) {
+      return res.redirect(302, '/?utm_source=' + source);
+    }
+
     // Otherwise serve the landing page
     if (req.path === '/' || req.path === '/index.html') {
       return res.sendFile('index.html', { root: landingDir });
