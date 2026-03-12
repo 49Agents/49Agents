@@ -2159,11 +2159,6 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
       case 'terminal:history':
         if (payload.data) {
           const termInfo = terminals.get(payload.terminalId);
-          // If this is a refresh request, clear the buffer and re-inject
-          if (payload.refresh && termInfo) {
-            termInfo._historyLoaded = false;
-            termInfo.xterm.clear(); // wipe scrollback
-          }
           // Only inject history once per xterm instance. On WebSocket
           // reconnect the agent re-sends history, but the xterm buffer
           // already has it — writing it again causes duplicate content.
@@ -5004,6 +4999,25 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
     }
   }
 
+  // Re-attach a terminal — equivalent to what a page reload does.
+  // Clears xterm buffer, resets all flags, and sends terminal:attach
+  // which triggers the full history capture + force redraw on the agent.
+  function reattachTerminal(pane) {
+    const termInfo = terminals.get(pane.id);
+    if (!termInfo) return;
+
+    // Clear xterm buffer (scrollback + visible area)
+    termInfo.xterm.clear();
+    termInfo.xterm.reset();
+
+    // Reset flags so history injection runs again
+    termInfo._historyLoaded = false;
+    termInfo._initialAttachDone = false;
+
+    // Re-attach — agent will re-capture history, send it, then force redraw
+    attachTerminal(pane);
+  }
+
   // Render a single pane with terminal
   function renderPane(paneData) {
     const existingPane = document.getElementById(`pane-${paneData.id}`);
@@ -7482,19 +7496,15 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
       });
     }
 
-    // Refresh history button (terminal panes only)
+    // Refresh history button (terminal panes only) — re-runs the full
+    // attach cycle: clears xterm, resets flags, sends terminal:attach.
+    // The agent re-captures tmux history, sends it, then force-redraws.
+    // This is equivalent to what happens on a page reload.
     const refreshHistoryBtn = paneEl.querySelector('.term-refresh-history');
     if (refreshHistoryBtn) {
       refreshHistoryBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const termInfo = terminals.get(paneData.id);
-        if (termInfo) {
-          sendWs('terminal:refreshHistory', {
-            terminalId: paneData.id,
-            cols: termInfo.xterm.cols,
-            rows: termInfo.xterm.rows
-          }, paneData.agentId);
-        }
+        reattachTerminal(paneData);
       });
     }
 
@@ -8307,15 +8317,10 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
               cols: termInfo.xterm.cols,
               rows: termInfo.xterm.rows
             }, paneData.agentId);
-            // Re-fetch history from server to fix any render corruption
-            // caused by the resize. Delay slightly so tmux has time to
-            // process the new dimensions first.
+            // Re-attach after resize to get clean history + live screen.
+            // Delay slightly so tmux has time to process the new dimensions.
             setTimeout(() => {
-              sendWs('terminal:refreshHistory', {
-                terminalId: paneData.id,
-                cols: termInfo.xterm.cols,
-                rows: termInfo.xterm.rows
-              }, paneData.agentId);
+              reattachTerminal(paneData);
             }, 300);
           } catch (e) {
             // Ignore fit errors

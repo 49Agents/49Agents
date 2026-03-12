@@ -149,23 +149,6 @@ export function createMessageRouter(sendToRelay, options = {}) {
       sendToRelay(MSG.TERMINAL_CLOSED, { terminalId: payload.terminalId });
     },
 
-    [MSG.TERMINAL_REFRESH_HISTORY]: async (payload) => {
-      const { terminalId, cols, rows } = payload;
-      try {
-        if (cols && rows) {
-          await tmuxService.resizeTerminal(terminalId, cols, rows);
-        }
-        const history = await tmuxService.captureHistory(terminalId);
-        if (history) {
-          const normalized = history.replace(/\n/g, '\r\n');
-          const base64History = Buffer.from(normalized).toString('base64');
-          sendToRelay(MSG.TERMINAL_HISTORY, { terminalId, data: base64History, refresh: true });
-        }
-      } catch (err) {
-        console.error(`[Terminal] Failed to refresh history for ${terminalId.slice(0,8)}:`, err.message);
-      }
-    },
-
     [MSG.TERMINAL_DETACH]: (payload) => {
       wiredTerminals.delete(payload.terminalId);
       terminalManager.detachTerminal(payload.terminalId);

@@ -24,7 +24,6 @@ export const MSG = {
   TERMINAL_ERROR: 'terminal:error',
   TERMINAL_RESUME: 'terminal:resume',
   TERMINAL_RESUMED: 'terminal:resumed',
-  TERMINAL_REFRESH_HISTORY: 'terminal:refreshHistory',
 
   // Claude states
   CLAUDE_STATES: 'claude:states',
