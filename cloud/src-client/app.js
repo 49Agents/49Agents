@@ -431,6 +431,8 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
 
   // Agents HUD state
   let agentsHudExpanded = false;
+  let feedbackHudExpanded = false;
+  let feedbackPaneHidden = false;
   let hudHidden = false;
   let fleetPaneHidden = false;
   let agentsPaneHidden = false;
@@ -517,31 +519,34 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
       // Tab+H restores all panes to visible
       fleetPaneHidden = false;
       agentsPaneHidden = false;
+      feedbackPaneHidden = false;
       if (container) container.style.display = '';
       if (dot) dot.style.display = 'none';
       applyPaneVisibility();
       applyNoHudMode(false);
     }
-    savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, hud_hidden: hudHidden } });
+    savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded, hud_hidden: hudHidden } });
   }
 
   function applyPaneVisibility() {
     const fleet = document.getElementById('hud-overlay');
     const agents = document.getElementById('agents-hud');
+    const feedback = document.getElementById('feedback-hud');
     if (fleet) fleet.style.display = fleetPaneHidden ? 'none' : '';
     if (agents) agents.style.display = agentsPaneHidden ? 'none' : '';
+    if (feedback) feedback.style.display = feedbackPaneHidden ? 'none' : '';
   }
 
   function checkAutoHideHud() {
     // If all panes are individually hidden, auto-collapse to dot
-    if (fleetPaneHidden && agentsPaneHidden) {
+    if (fleetPaneHidden && agentsPaneHidden && feedbackPaneHidden) {
       hudHidden = true;
       const container = document.getElementById('hud-container');
       const dot = document.getElementById('hud-restore-dot');
       if (container) container.style.display = 'none';
       if (dot) dot.style.display = 'block';
       applyNoHudMode(true);
-      savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, hud_hidden: hudHidden } });
+      savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded, hud_hidden: hudHidden } });
     }
   }
 
@@ -979,6 +984,212 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
     // Polling starts when first agent comes online (see updateAgentsHud)
   }
 
+  // === Chat HUD ===
+  function createChatHud(container) {
+    const CHAT_MAX_LENGTH = 3000;
+    const CHAT_WARN_THRESHOLD = 2500;
+    let chatLastSentAt = 0;
+    let chatUnreadCount = 0;
+    let chatMessagesLoaded = false;
+
+    const hud = document.createElement('div');
+    hud.id = 'feedback-hud';
+    if (!feedbackHudExpanded) hud.classList.add('collapsed');
+    hud.innerHTML = `
+      <div class="hud-header chat-hud-header">
+        <span class="hud-title">Feedback</span>
+        <span class="chat-unread-badge" style="display:none;"></span>
+      </div>
+      <div class="chat-hud-content">
+        <div class="chat-messages"></div>
+        <div class="chat-input-area">
+          <textarea class="chat-textarea" rows="2" maxlength="3000" placeholder="shift + enter to send"></textarea>
+          <div class="chat-input-footer">
+            <span class="chat-char-count"></span>
+            <span class="chat-status"></span>
+            <button class="chat-send-btn">Send</button>
+          </div>
+        </div>
+      </div>
+    `;
+    container.appendChild(hud);
+
+    const msgList = hud.querySelector('.chat-messages');
+    const textarea = hud.querySelector('.chat-textarea');
+    const sendBtn = hud.querySelector('.chat-send-btn');
+    const statusEl = hud.querySelector('.chat-status');
+    const charCountEl = hud.querySelector('.chat-char-count');
+    const unreadBadge = hud.querySelector('.chat-unread-badge');
+
+    // Restore draft
+    const savedDraft = localStorage.getItem('tc_feedback_draft');
+    if (savedDraft) textarea.value = savedDraft.substring(0, CHAT_MAX_LENGTH);
+
+    function updateCharCount() {
+      const len = textarea.value.length;
+      if (len >= CHAT_WARN_THRESHOLD) {
+        charCountEl.textContent = `${len} / ${CHAT_MAX_LENGTH}`;
+        charCountEl.style.display = '';
+      } else {
+        charCountEl.textContent = '';
+        charCountEl.style.display = 'none';
+      }
+    }
+
+    function updateBadge() {
+      if (chatUnreadCount > 0) {
+        unreadBadge.textContent = chatUnreadCount > 99 ? '99+' : chatUnreadCount;
+        unreadBadge.style.display = '';
+      } else {
+        unreadBadge.style.display = 'none';
+      }
+    }
+
+    function formatTime(dateStr) {
+      const d = new Date(dateStr + 'Z');
+      const now = new Date();
+      const diff = now - d;
+      if (diff < 60000) return 'now';
+      if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+      if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    function appendMessage(msg) {
+      const bubble = document.createElement('div');
+      bubble.className = 'chat-bubble ' + (msg.sender === 'admin' ? 'admin' : 'user');
+      bubble.innerHTML = `
+        <div class="chat-bubble-body">${escapeHtml(msg.body)}</div>
+        <div class="chat-bubble-time">${formatTime(msg.created_at)}</div>
+      `;
+      msgList.appendChild(bubble);
+    }
+
+    async function loadMessages() {
+      try {
+        const data = await cloudFetch('GET', '/api/messages');
+        msgList.innerHTML = '';
+        if (data.messages && data.messages.length > 0) {
+          data.messages.forEach(m => appendMessage(m));
+          msgList.scrollTop = msgList.scrollHeight;
+        } else {
+          msgList.innerHTML = '<div class="chat-empty">No messages yet. Say hello!</div>';
+        }
+        chatUnreadCount = data.unread || 0;
+        updateBadge();
+        chatMessagesLoaded = true;
+        if (chatUnreadCount > 0) {
+          cloudFetch('POST', '/api/messages/mark-read').then(() => {
+            chatUnreadCount = 0;
+            updateBadge();
+          }).catch(() => {});
+        }
+      } catch (e) {
+        // Feedback routes not available (self-hosted without extensions)
+        console.warn('[chat] Messages not available:', e.message);
+      }
+    }
+
+    async function sendMessage() {
+      const message = textarea.value.trim();
+      if (!message) return;
+      const now = Date.now();
+      if (now - chatLastSentAt < 10000) {
+        statusEl.textContent = 'Wait 10s';
+        statusEl.className = 'chat-status error';
+        return;
+      }
+      sendBtn.disabled = true;
+      statusEl.textContent = '';
+      statusEl.className = 'chat-status';
+      try {
+        const resp = await cloudFetch('POST', '/api/messages', { message });
+        chatLastSentAt = Date.now();
+        textarea.value = '';
+        localStorage.removeItem('tc_feedback_draft');
+        updateCharCount();
+        if (resp.message) {
+          const empty = msgList.querySelector('.chat-empty');
+          if (empty) empty.remove();
+          appendMessage(resp.message);
+          msgList.scrollTop = msgList.scrollHeight;
+        }
+      } catch (e) {
+        statusEl.textContent = 'Failed';
+        statusEl.className = 'chat-status error';
+        setTimeout(() => { statusEl.textContent = ''; }, 2000);
+      } finally {
+        sendBtn.disabled = false;
+      }
+    }
+
+    textarea.addEventListener('input', () => {
+      if (textarea.value.length > CHAT_MAX_LENGTH) {
+        textarea.value = textarea.value.substring(0, CHAT_MAX_LENGTH);
+      }
+      localStorage.setItem('tc_feedback_draft', textarea.value);
+      updateCharCount();
+    });
+
+    hud.addEventListener('click', (e) => {
+      if (e.target.closest('textarea, button, a, select')) return;
+      feedbackHudExpanded = !feedbackHudExpanded;
+      hud.classList.toggle('collapsed', !feedbackHudExpanded);
+      if (feedbackHudExpanded) {
+        textarea.focus();
+        loadMessages();
+      }
+      savePrefsToCloud({
+        hudState: {
+          fleet_expanded: hudExpanded,
+          agents_expanded: agentsHudExpanded,
+          feedback_expanded: feedbackHudExpanded,
+        }
+      });
+    });
+
+    sendBtn.addEventListener('click', sendMessage);
+
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    updateCharCount();
+
+    if (feedbackHudExpanded) {
+      loadMessages();
+    } else {
+      cloudFetch('GET', '/api/messages/unread-count').then(data => {
+        chatUnreadCount = data.count || 0;
+        updateBadge();
+      }).catch(() => {});
+    }
+
+    window._chatHud = {
+      appendMessage,
+      loadMessages,
+      get isExpanded() { return feedbackHudExpanded; },
+      get unreadCount() { return chatUnreadCount; },
+      set unreadCount(v) { chatUnreadCount = v; updateBadge(); },
+      markRead() {
+        cloudFetch('POST', '/api/messages/mark-read').then(() => {
+          chatUnreadCount = 0;
+          updateBadge();
+        }).catch(() => {});
+      },
+      scrollToBottom() { msgList.scrollTop = msgList.scrollHeight; },
+    };
+  }
+
   async function fetchAgentsUsage() {
     // Query all online agents in parallel — use first successful response
     // (usage data is per-account, so any online agent returns the same data)
@@ -1252,6 +1463,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
       if (prefs.hudState) {
         hudExpanded = !!prefs.hudState.fleet_expanded;
         agentsHudExpanded = !!prefs.hudState.agents_expanded;
+        feedbackHudExpanded = !!prefs.hudState.feedback_expanded;
         if (prefs.hudState.device_colors) deviceColorOverrides = prefs.hudState.device_colors;
         hudHidden = !!prefs.hudState.hud_hidden;
       }
@@ -1291,6 +1503,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
     const hudContainer = createHudContainer();
     createHud(hudContainer);
     createAgentsHud(hudContainer);
+    createChatHud(hudContainer);
     // Apply HUD hidden state from preferences
     if (hudHidden) {
       hudContainer.style.display = 'none';
@@ -2200,6 +2413,24 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
       case 'tier:limit':
         // Tier limit hit — show upgrade prompt
         showUpgradePrompt(payload.message);
+        break;
+
+      case 'chat:message':
+        if (window._chatHud) {
+          const chatEl = document.getElementById('feedback-hud');
+          const chatMsgList = chatEl?.querySelector('.chat-messages');
+          if (chatMsgList) {
+            const empty = chatMsgList.querySelector('.chat-empty');
+            if (empty) empty.remove();
+            window._chatHud.appendMessage(payload);
+            window._chatHud.scrollToBottom();
+          }
+          if (!window._chatHud.isExpanded) {
+            window._chatHud.unreadCount = window._chatHud.unreadCount + 1;
+          } else {
+            window._chatHud.markRead();
+          }
+        }
         break;
 
     }
@@ -9491,7 +9722,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
           applyPaneVisibility();
           const hudEl = document.getElementById('hud-overlay');
           if (hudEl) hudEl.classList.remove('collapsed');
-          savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, hud_hidden: hudHidden } });
+          savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded, hud_hidden: hudHidden } });
           restartHudPolling();
           renderHud();
         } else if (fleetPaneHidden || agentsPaneHidden) {
@@ -9503,7 +9734,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
             applyPaneVisibility();
             const hudEl = document.getElementById('hud-overlay');
             if (hudEl) hudEl.classList.remove('collapsed');
-            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded } });
+            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded } });
             restartHudPolling();
             renderHud();
           } else {
@@ -9518,7 +9749,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
           if (hudEl) {
             hudExpanded = !hudExpanded;
             hudEl.classList.toggle('collapsed', !hudExpanded);
-            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded } });
+            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded } });
             restartHudPolling();
             renderHud();
           }
@@ -9544,7 +9775,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
           applyPaneVisibility();
           const agentsEl = document.getElementById('agents-hud');
           if (agentsEl) agentsEl.classList.remove('collapsed');
-          savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, hud_hidden: hudHidden } });
+          savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded, hud_hidden: hudHidden } });
           renderAgentsHud();
         } else if (fleetPaneHidden || agentsPaneHidden) {
           // Selective mode
@@ -9554,7 +9785,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
             applyPaneVisibility();
             const agentsEl = document.getElementById('agents-hud');
             if (agentsEl) agentsEl.classList.remove('collapsed');
-            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded } });
+            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded } });
             renderAgentsHud();
           } else {
             agentsPaneHidden = true;
@@ -9567,7 +9798,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
           if (agentsEl) {
             agentsHudExpanded = !agentsHudExpanded;
             agentsEl.classList.toggle('collapsed', !agentsHudExpanded);
-            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded } });
+            savePrefsToCloud({ hudState: { fleet_expanded: hudExpanded, agents_expanded: agentsHudExpanded, feedback_expanded: feedbackHudExpanded } });
             renderAgentsHud();
           }
         }
