@@ -2126,6 +2126,23 @@ html, body {
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
+/* Guest expiry toast */
+.notification-toast.state-guest-expiry {
+  border-color: rgba(234, 179, 8, 0.5);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.4),
+    0 0 12px rgba(234, 179, 8, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.notification-toast.state-guest-expiry:hover {
+  border-left: 3px solid rgba(234, 179, 8, 0.8);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 0 20px rgba(234, 179, 8, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
 .notification-icon {
   font-size: 20px;
   flex-shrink: 0;
