@@ -5393,7 +5393,8 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
       if (termInfo) {
         const doFit = () => {
           try {
-            termInfo.fitAddon.fit();
+            if (termInfo.safeFitAndSync) termInfo.safeFitAndSync();
+            else termInfo.fitAddon.fit();
             termInfo.xterm.focus();
           } catch (e) {
             console.error('[App] Fit error on expand:', e);
@@ -5473,7 +5474,8 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
       if (termInfo) {
         setTimeout(() => {
           try {
-            termInfo.fitAddon.fit();
+            if (termInfo.safeFitAndSync) termInfo.safeFitAndSync();
+            else termInfo.fitAddon.fit();
           } catch (e) {
             console.error('[App] Fit error on collapse:', e);
           }
@@ -7300,19 +7302,68 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
       }
     });
 
-    // Handle terminal resize - debounced
+    // Handle terminal resize — send to server and track last-sent size
+    // for desync detection. No debounce: we always want the server to
+    // know xterm's actual dimensions immediately after a fit().
+    let lastSentCols = 0, lastSentRows = 0;
     let resizeTimeout = null;
     xterm.onResize(({ cols, rows }) => {
       if (resizeTimeout) clearTimeout(resizeTimeout);
       resizeTimeout = setTimeout(() => {
+        lastSentCols = cols;
+        lastSentRows = rows;
         sendWs('terminal:resize', { terminalId: paneData.id, cols, rows }, paneData.agentId);
       }, 100);
     });
 
+    // Guard flag: prevent ResizeObserver from re-triggering fit() when
+    // fit() itself changes the terminal element size.
+    let fitting = false;
+
+    function safeFit() {
+      if (fitting) return;
+      fitting = true;
+      try {
+        fitAddon.fit();
+      } catch (e) {
+        // Ignore fit errors
+      } finally {
+        // Release guard after a microtask so the ResizeObserver callback
+        // (which fires asynchronously) still sees fitting=true.
+        Promise.resolve().then(() => { fitting = false; });
+      }
+    }
+
+    // After any fit, make sure the server knows the final size.
+    // This catches cases where rapid fits cancel each other's debounced
+    // onResize, leaving tmux with a stale row/col count.
+    function safeFitAndSync() {
+      safeFit();
+      // Schedule a sync after the debounce window settles
+      scheduleSizeSync();
+    }
+
+    let syncTimeout = null;
+    function scheduleSizeSync() {
+      if (syncTimeout) clearTimeout(syncTimeout);
+      syncTimeout = setTimeout(() => {
+        const cols = xterm.cols, rows = xterm.rows;
+        if (cols !== lastSentCols || rows !== lastSentRows) {
+          lastSentCols = cols;
+          lastSentRows = rows;
+          sendWs('terminal:resize', { terminalId: paneData.id, cols, rows }, paneData.agentId);
+        }
+      }, 250); // after the 100ms onResize debounce settles
+    }
+
+    // Expose safeFitAndSync on termInfo so external code (expand, zoom,
+    // manual resize) can use the guarded fit instead of raw fitAddon.fit()
+    terminals.get(paneData.id).safeFitAndSync = safeFitAndSync;
+
     // Fit after container is ready, then attach
     setTimeout(() => {
       try {
-        fitAddon.fit();
+        safeFit();
         // Now attach terminal after fit
         const pane = state.panes.find(p => p.id === paneData.id);
         if (pane) {
@@ -7327,26 +7378,35 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
     // where initial fit calculates wrong row count, leaving the
     // bottom 100-200px of the terminal unreachable.
     setTimeout(() => {
-      try {
-        fitAddon.fit();
-      } catch (e) {
-        // Ignore fit errors
-      }
+      safeFitAndSync();
     }, 2000);
 
-    // Setup debounced resize observer
+    // Setup debounced resize observer — guarded against fit() feedback
     let observerTimeout = null;
     const resizeObserver = new ResizeObserver(() => {
+      if (fitting) return; // skip: this was triggered by fit() itself
       if (observerTimeout) clearTimeout(observerTimeout);
       observerTimeout = setTimeout(() => {
-        try {
-          fitAddon.fit();
-        } catch (e) {
-          // Ignore fit errors
-        }
+        safeFitAndSync();
       }, 100);
     });
     resizeObserver.observe(container);
+
+    // Periodic desync recovery: every 10s, if xterm's size doesn't match
+    // what we last told the server, re-send the resize and force a full
+    // terminal refresh so tmux repaints all rows.
+    const desyncInterval = setInterval(() => {
+      if (!terminals.has(paneData.id)) { clearInterval(desyncInterval); return; }
+      const cols = xterm.cols, rows = xterm.rows;
+      if (cols !== lastSentCols || rows !== lastSentRows) {
+        console.log(`[DESYNC] Terminal ${paneData.id.slice(0,8)}: xterm=${cols}x${rows} server=${lastSentCols}x${lastSentRows} — resyncing`);
+        lastSentCols = cols;
+        lastSentRows = rows;
+        sendWs('terminal:resize', { terminalId: paneData.id, cols, rows }, paneData.agentId);
+        // Force xterm to repaint all visible rows
+        xterm.refresh(0, rows - 1);
+      }
+    }, 10000);
   }
 
   // Setup pane event listeners
@@ -7361,7 +7421,8 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
       const termInfo = terminals.get(paneData.id);
       if (container && termInfo) {
         container.style.zoom = scale === 1 ? '' : scale;
-        termInfo.fitAddon.fit();
+        if (termInfo.safeFitAndSync) termInfo.safeFitAndSync();
+        else termInfo.fitAddon.fit();
       }
     } else if (paneData.type === 'file') {
       const edInfo = fileEditors.get(paneData.id);
@@ -8168,7 +8229,8 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
         const termInfo = terminals.get(paneData.id);
         if (termInfo) {
           try {
-            termInfo.fitAddon.fit();
+            if (termInfo.safeFitAndSync) termInfo.safeFitAndSync();
+            else termInfo.fitAddon.fit();
           } catch (e) {
             // Ignore fit errors
           }
@@ -8222,8 +8284,10 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
         const termInfo = terminals.get(paneData.id);
         if (termInfo) {
           try {
-            termInfo.fitAddon.fit();
-            // Send resize to server
+            if (termInfo.safeFitAndSync) termInfo.safeFitAndSync();
+            else termInfo.fitAddon.fit();
+            // safeFitAndSync already schedules a sync, but send immediately
+            // as a belt-and-suspenders for manual resize end
             sendWs('terminal:resize', {
               terminalId: paneData.id,
               cols: termInfo.xterm.cols,
