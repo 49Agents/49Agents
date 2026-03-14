@@ -3669,7 +3669,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
       render: renderFolderPane },
   ];
 
-  async function loadPanesFromAgent(agentId) {
+  async function loadPanesFromAgent(agentId, cloudLayoutMap) {
     const agent = agents.find(a => a.agentId === agentId);
     const agentHostname = agent && agent.hostname ? agent.hostname : null;
 
@@ -3680,8 +3680,10 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
     PANE_TYPES.forEach((cfg, i) => {
       for (const item of results[i]) {
         if (state.panes.some(p => p.id === item.id)) continue;
-        const position = item.position || cfg.defPos;
-        const size = item.size || cfg.defSize;
+        // Prefer cloud-saved layout, then agent-provided, then defaults
+        const cl = cloudLayoutMap && cloudLayoutMap.get(item.id);
+        const position = cl ? { x: cl.position_x, y: cl.position_y } : (item.position || cfg.defPos);
+        const size = cl ? { width: cl.width, height: cl.height } : (item.size || cfg.defSize);
         const pane = {
           id: item.id,
           type: cfg.type,
@@ -3689,10 +3691,21 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
           y: position.y,
           width: size.width,
           height: size.height,
-          zIndex: state.nextZIndex++,
+          zIndex: (cl && cl.z_index) ? cl.z_index : state.nextZIndex++,
           ...cfg.extraFields(item),
           agentId: agentId
         };
+        // Restore metadata from cloud layout
+        if (cl && cl.metadata) {
+          if (cl.metadata.device && !pane.device) pane.device = cl.metadata.device;
+          if (cl.metadata.zoomLevel) pane.zoomLevel = cl.metadata.zoomLevel;
+          if (cl.metadata.textOnly) pane.textOnly = cl.metadata.textOnly;
+          if (cl.metadata.folderPath) pane.folderPath = cl.metadata.folderPath;
+          if (cl.metadata.beadsTag) pane.beadsTag = cl.metadata.beadsTag;
+          if (cl.metadata.claudeSessionId) pane.claudeSessionId = cl.metadata.claudeSessionId;
+          if (cl.metadata.claudeSessionName) pane.claudeSessionName = cl.metadata.claudeSessionName;
+          if (cl.metadata.workingDir) pane.workingDir = cl.metadata.workingDir;
+        }
         // Fill in device from agent hostname if the agent didn't return one
         if (!pane.device && agentHostname) pane.device = agentHostname;
         state.panes.push(pane);
@@ -3704,54 +3717,39 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
 
   async function loadTerminalsFromServer() {
     try {
-      // Load panes from all online agents in parallel
-      const onlineAgents = agents.filter(a => a.online);
-      if (onlineAgents.length > 0) {
-        await Promise.all(onlineAgents.map(a => loadPanesFromAgent(a.agentId)));
-      }
-
-      // Cloud Phase 4: Apply cloud layout positions (overrides agent positions if newer)
+      // Fetch cloud layouts FIRST so panes render with correct positions immediately
+      let cloudLayoutMap = new Map();
+      let cloudLayouts = [];
       try {
         const cloudData = await cloudFetch('GET', '/api/layouts');
         if (cloudData.layouts && cloudData.layouts.length > 0) {
-          const cloudMap = new Map(cloudData.layouts.map(l => [l.id, l]));
-          for (const pane of state.panes) {
-            const cl = cloudMap.get(pane.id);
-            if (cl) {
-              pane.x = cl.position_x;
-              pane.y = cl.position_y;
-              pane.width = cl.width;
-              pane.height = cl.height;
-              if (cl.z_index) pane.zIndex = cl.z_index;
-              // Restore agentId from cloud layout if pane doesn't have one
-              if (cl.agent_id && !pane.agentId) pane.agentId = cl.agent_id;
-              if (cl.metadata) {
-                if (cl.metadata.device && !pane.device) pane.device = cl.metadata.device;
-                if (cl.metadata.zoomLevel) pane.zoomLevel = cl.metadata.zoomLevel;
-                if (cl.metadata.textOnly) pane.textOnly = cl.metadata.textOnly;
-                if (cl.metadata.folderPath) pane.folderPath = cl.metadata.folderPath;
-                if (cl.metadata.beadsTag) pane.beadsTag = cl.metadata.beadsTag;
-                if (cl.metadata.claudeSessionId) pane.claudeSessionId = cl.metadata.claudeSessionId;
-                if (cl.metadata.claudeSessionName) pane.claudeSessionName = cl.metadata.claudeSessionName;
-                if (cl.metadata.workingDir) pane.workingDir = cl.metadata.workingDir;
-              }
-              // Update DOM
-              const el = document.getElementById(`pane-${pane.id}`);
-              if (el) {
-                el.style.left = `${pane.x}px`;
-                el.style.top = `${pane.y}px`;
-                el.style.width = `${pane.width}px`;
-                el.style.height = `${pane.height}px`;
-                el.style.zIndex = pane.zIndex;
-              }
-            }
-          }
+          cloudLayouts = cloudData.layouts;
+          cloudLayoutMap = new Map(cloudLayouts.map(l => [l.id, l]));
         }
-        // Create offline placeholder panes for cloud layouts whose agents are not online.
-        // This ensures panes from disconnected devices remain visible on the canvas.
-        if (cloudData.layouts && cloudData.layouts.length > 0) {
-          const existingIds = new Set(state.panes.map(p => p.id));
-          for (const cl of cloudData.layouts) {
+      } catch (e) {
+        console.warn('[Cloud] Failed to pre-fetch cloud layouts:', e.message);
+      }
+
+      // Load panes from all online agents, passing cloud layout data for correct positioning
+      const onlineAgents = agents.filter(a => a.online);
+      if (onlineAgents.length > 0) {
+        await Promise.all(onlineAgents.map(a => loadPanesFromAgent(a.agentId, cloudLayoutMap)));
+      }
+
+      // Apply cloud layout data to any panes that were already in state before this load
+      // (e.g. panes added by earlier agent loads or other code paths)
+      for (const pane of state.panes) {
+        const cl = cloudLayoutMap.get(pane.id);
+        if (cl) {
+          if (cl.agent_id && !pane.agentId) pane.agentId = cl.agent_id;
+        }
+      }
+
+      // Create offline placeholder panes for cloud layouts whose agents are not online.
+      // This ensures panes from disconnected devices remain visible on the canvas.
+      if (cloudLayouts.length > 0) {
+        const existingIds = new Set(state.panes.map(p => p.id));
+        for (const cl of cloudLayouts) {
             if (existingIds.has(cl.id)) continue; // already loaded from online agent
             const meta = cl.metadata ? (typeof cl.metadata === 'string' ? JSON.parse(cl.metadata) : cl.metadata) : {};
             // Resolve device name: metadata > agent hostname from DB > agents array
@@ -3784,20 +3782,17 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
             state.panes.push(pane);
             renderOfflinePlaceholder(pane);
           }
-        }
+      }
 
-        // Fetch fresh beads tag statuses
-        for (const pane of state.panes) {
-          if (pane.beadsTag && pane.beadsTag.id) {
-            refreshBeadsTagStatus(pane);
-          }
+      // Fetch fresh beads tag statuses
+      for (const pane of state.panes) {
+        if (pane.beadsTag && pane.beadsTag.id) {
+          refreshBeadsTagStatus(pane);
         }
-        // Sync any panes the cloud doesn't know about yet
-        for (const pane of state.panes) {
-          cloudSaveLayout(pane);
-        }
-      } catch (e) {
-        console.warn('[Cloud] Failed to load cloud layouts:', e.message);
+      }
+      // Sync any panes the cloud doesn't know about yet
+      for (const pane of state.panes) {
+        cloudSaveLayout(pane);
       }
 
       // Cloud Phase 4: Load cloud view state
