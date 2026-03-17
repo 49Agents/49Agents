@@ -45,220 +45,23 @@ function saveGitGraphs(gitGraphs) {
 let gitGraphsCache = loadGitGraphs();
 
 /**
- * Convert ANSI escape codes to HTML spans
- */
-function ansiToHtml(text) {
-  const colorMap = {
-    '0': '</span>',
-    '1': '<span class="ansi-bold">',
-    '2': '<span class="ansi-dim">',
-    '30': '<span class="ansi-black">',
-    '31': '<span class="ansi-red">',
-    '32': '<span class="ansi-green">',
-    '33': '<span class="ansi-yellow">',
-    '34': '<span class="ansi-blue">',
-    '35': '<span class="ansi-magenta">',
-    '36': '<span class="ansi-cyan">',
-    '37': '<span class="ansi-white">',
-    '90': '<span class="ansi-bright-black">',
-    '91': '<span class="ansi-bright-red">',
-    '92': '<span class="ansi-bright-green">',
-    '93': '<span class="ansi-bright-yellow">',
-    '94': '<span class="ansi-bright-blue">',
-    '95': '<span class="ansi-bright-magenta">',
-    '96': '<span class="ansi-bright-cyan">',
-    '97': '<span class="ansi-bright-white">',
-  };
-
-  // Escape HTML entities first
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-
-  // Replace ANSI codes with HTML spans
-  // Handle 256-color: \x1b[38;5;XXXm
-  html = html.replace(/\x1b\[38;5;(\d+)m/g, (_, code) => {
-    return `<span class="ansi-256-${code}">`;
-  });
-
-  // Handle standard codes
-  html = html.replace(/\x1b\[([0-9;]+)m/g, (_, codes) => {
-    const parts = codes.split(';');
-    let result = '';
-    for (const code of parts) {
-      if (code === '0') {
-        result += '</span>';
-      } else if (colorMap[code]) {
-        result += colorMap[code];
-      }
-    }
-    return result;
-  });
-
-  // Remove any remaining escape sequences
-  html = html.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-
-  return html;
-}
-
-/**
- * Format relative time (1m ago, 5h ago, 3d ago)
- */
-function relativeTime(unixTimestamp) {
-  const now = Math.floor(Date.now() / 1000);
-  const diff = now - unixTimestamp;
-  if (diff < 60) return '1m';
-  const mins = Math.floor(diff / 60);
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `${days}d`;
-}
-
-/**
- * Post-process graph HTML to add timestamps, indicators, and branch-colored hashes.
- * Two-color scheme: master = green, all other branches = blue.
- */
-function enhanceGraphHtml(graphHtml, commitData, refMap) {
-  const lines = graphHtml.split('\n');
-
-  // Find master branch's ANSI class by locating master/main commit's node
-  let masterAnsiClass = null;
-  for (const [hash, info] of commitData) {
-    if (info.refs && (info.refs.includes('HEAD -> master') || info.refs.includes('HEAD -> main') ||
-        info.refs.match(/\bmaster\b/) || info.refs.match(/\bmain\b/))) {
-      // Find this hash in the HTML lines and get its node's ANSI class
-      for (const line of lines) {
-        if (line.includes(hash)) {
-          const nodeMatch = line.match(/<span class="(ansi-256-\d+|ansi-\w+)">\u25cf<\/span>/);
-          if (nodeMatch) { masterAnsiClass = nodeMatch[1]; break; }
-        }
-      }
-      if (masterAnsiClass) break;
-    }
-  }
-
-  // Collect all ANSI classes used on graph nodes
-  const allAnsiClasses = new Set();
-  for (const line of lines) {
-    const matches = line.matchAll(/<span class="(ansi-256-\d+|ansi-\w+)">/g);
-    for (const m of matches) allAnsiClasses.add(m[1]);
-  }
-
-  const enhanced = lines.map(line => {
-    // Replace all ANSI color classes: master → green, others → blue
-    for (const ansiClass of allAnsiClasses) {
-      const branchClass = ansiClass === masterAnsiClass ? 'git-branch-master' : 'git-branch-other';
-      line = line.replaceAll(`class="${ansiClass}"`, `class="${branchClass}"`);
-    }
-
-    // Find a commit hash in this line (7-char hex inside a span)
-    const hashMatch = line.match(/<span class="([^"]+)">([a-f0-9]{7})<\/span>/);
-    if (!hashMatch) {
-      // Connector-only lines still need the indicator spacer for alignment
-      return '<span class="git-indicator"></span>' + line;
-    }
-
-    const hash = hashMatch[2];
-    const info = commitData.get(hash);
-
-    // 1. Color commit ID to match branch node color
-    const nodeMatch = line.match(/<span class="(git-branch-\w+)">\u25cf<\/span>/);
-    if (nodeMatch) {
-      const branchColorClass = nodeMatch[1];
-      line = line.replace(
-        `<span class="${hashMatch[1]}">${hash}</span>`,
-        `<span class="${branchColorClass}">${hash}</span>`
-      );
-    }
-
-    // 2. Add relative timestamp after hash
-    if (info?.timestamp) {
-      const timeStr = relativeTime(info.timestamp);
-      line = line.replace(
-        new RegExp(`(<span class="[^"]*">${hash}</span>)`),
-        `$1 <span class="git-time">${timeStr}</span>`
-      );
-    }
-
-    // 2b. Add tag labels after timestamp
-    if (info?.refs) {
-      const tagMatches = info.refs.match(/tag: ([^,)]+)/g);
-      if (tagMatches) {
-        const tags = tagMatches.map(t => t.replace('tag: ', '').trim());
-        const tagHtml = tags.map(t => `<span class="git-tag">\uD83C\uDFF7 ${t}</span>`).join(' ');
-        // Insert after the git-time span, or after the hash span if no time
-        const timeSpanEnd = '</span>';
-        const timeIdx = line.lastIndexOf('class="git-time"');
-        if (timeIdx !== -1) {
-          const closeIdx = line.indexOf(timeSpanEnd, timeIdx);
-          if (closeIdx !== -1) {
-            const insertPos = closeIdx + timeSpanEnd.length;
-            line = line.slice(0, insertPos) + ' ' + tagHtml + line.slice(insertPos);
-          }
-        } else {
-          const hashSpanMatch = line.match(new RegExp(`(<span class="[^"]*">${hash}</span>)`));
-          if (hashSpanMatch) {
-            line = line.replace(hashSpanMatch[1], hashSpanMatch[1] + ' ' + tagHtml);
-          }
-        }
-      }
-    }
-
-    // 3. Add master/remote indicators on the LEFT of the line
-    let indicator = '';
-    if (info?.refs) {
-      const refs = info.refs;
-      if (refs.includes('origin/master') || refs.includes('origin/main')) {
-        indicator = '<span class="git-indicator git-remote" title="remote"><svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor" style="vertical-align:middle"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg></span>';
-      }
-      if (refs.includes('HEAD -> master') || refs.includes('HEAD -> main') ||
-          (refs.match(/\bmaster\b/) && !refs.includes('origin/')) ||
-          (refs.match(/\bmain\b/) && !refs.includes('origin/'))) {
-        indicator = '<span class="git-indicator git-master" title="master">\u2299</span>';
-      }
-      if ((refs.includes('origin/master') || refs.includes('origin/main')) &&
-          (refs.match(/\bmaster\b/) || refs.match(/\bmain\b/)) &&
-          !(refs.includes('origin/master') && !refs.match(/(?<!origin\/)master\b/))) {
-        const hasLocal = refs.includes('HEAD -> master') || refs.includes('HEAD -> main') ||
-          (refs.replace(/origin\/master|origin\/main/g, '').match(/\bmaster\b|\bmain\b/));
-        const hasRemote = refs.includes('origin/master') || refs.includes('origin/main');
-        if (hasLocal && hasRemote) {
-          indicator = '<span class="git-indicator git-synced" title="master + remote"><svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor" style="vertical-align:middle"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg></span>';
-        }
-      }
-    }
-
-    if (indicator) {
-      line = indicator + line;
-    } else {
-      line = '<span class="git-indicator"></span>' + line;
-    }
-
-    return line;
-  });
-
-  return enhanced.join('\n');
-}
-
-/**
- * Fetch git graph data for a local repository (async — does NOT block event loop)
+ * Fetch structured git graph data for a local repository (async).
+ * Returns commit objects with parent hashes so the client can render an SVG graph.
  */
 async function fetchGraphData(repoPath, maxCommits = 50) {
   const opts = { cwd: repoPath, encoding: 'utf-8', timeout: 15000 };
+  // Use a delimiter unlikely to appear in commit messages
+  const SEP = '‡‡';
+  const fmt = ['%h', '%p', '%an', '%s', '%D', '%at'].join(SEP);
   try {
-    // Verify it's a git repo
     await execAsync('git rev-parse --is-inside-work-tree', opts);
 
-    // Run independent git queries in parallel to minimize wall-clock time
     const [branchResult, stagedResult, unstagedResult, untrackedResult, logResult] = await Promise.all([
       execAsync('git branch --show-current', opts),
       execAsync('git diff --cached --name-only', opts),
       execAsync('git diff --name-only', opts),
       execAsync('git ls-files --others --exclude-standard', opts),
-      execAsync(`git log --all --format="%h %at %D" -n ${maxCommits}`, opts).catch(() => ({ stdout: '' })),
+      execAsync(`git log --all --topo-order --format="${fmt}" -n ${maxCommits}`, opts).catch(() => ({ stdout: '' })),
     ]);
 
     const branch = branchResult.stdout.trim();
@@ -267,38 +70,27 @@ async function fetchGraphData(repoPath, maxCommits = 50) {
     const untracked = untrackedResult.stdout.trim().split('\n').filter(Boolean).length;
     const total = staged + unstaged + untracked;
 
-    // Get commit timestamps and refs for enrichment
-    const commitData = new Map();
-    const refMap = new Map();
+    const commits = [];
     for (const line of logResult.stdout.trim().split('\n')) {
       if (!line) continue;
-      const parts = line.match(/^([a-f0-9]+)\s+(\d+)\s*(.*)?$/);
-      if (parts) {
-        const [, hash, ts, refs] = parts;
-        commitData.set(hash, { timestamp: parseInt(ts), refs: refs || '' });
-        if (refs) refMap.set(hash, refs);
-      }
+      const parts = line.split(SEP);
+      if (parts.length < 6) continue;
+      const [hash, parentStr, author, subject, refs, ts] = parts;
+      commits.push({
+        hash,
+        parents: parentStr ? parentStr.split(' ').filter(Boolean) : [],
+        author,
+        subject,
+        refs: refs || '',
+        timestamp: parseInt(ts)
+      });
     }
-
-    // Try git-graph first, fall back to git log --graph
-    let graphOutput;
-    const graphEnv = { ...process.env, PATH: process.env.PATH + ':/home/' + process.env.USER + '/.cargo/bin' + ':/home/' + process.env.USER + '/.local/bin' };
-    try {
-      const result = await execAsync(`git-graph -s round --no-pager --color always -n ${maxCommits}`, { ...opts, env: graphEnv });
-      graphOutput = result.stdout;
-    } catch {
-      const result = await execAsync(`git log --all --graph --oneline --decorate --color=always -n ${maxCommits}`, opts);
-      graphOutput = result.stdout;
-    }
-
-    let graphHtml = ansiToHtml(graphOutput);
-    graphHtml = enhanceGraphHtml(graphHtml, commitData, refMap);
 
     return {
       branch,
       uncommitted: { total, staged, unstaged, untracked },
       clean: total === 0,
-      graphHtml,
+      commits,
       repoPath,
       timestamp: Date.now()
     };
