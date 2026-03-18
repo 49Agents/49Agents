@@ -4806,7 +4806,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
         const selectBtn = document.createElement('div');
         selectBtn.setAttribute('data-nav-item', '');
         selectBtn.style.cssText = 'display:flex; align-items:center; gap:10px; padding:9px 16px; cursor:pointer; transition:background 0.1s; font-size:13px; background:rgba(var(--accent-rgb),0.1); border-bottom:1px solid rgba(255,255,255,0.05); margin-bottom:2px;';
-        selectBtn.innerHTML = `<span style="width:20px; text-align:center; color:#6366f1;">\u2713</span><span style="color:#a5b4fc; font-weight:500;">${escapeHtml(scanLabel)}</span>`;
+        selectBtn.innerHTML = `<span style="width:20px; text-align:center; color:#da7756;">\u2713</span><span style="color:#e8a882; font-weight:500;">${escapeHtml(scanLabel)}</span>`;
         selectBtn.addEventListener('click', () => onScan(data.path, contentArea, closeBrowser, navigateFolder, () => nav.refresh()));
         selectBtn.addEventListener('mouseenter', () => { selectBtn.style.background = 'rgba(var(--accent-rgb),0.25)'; });
         selectBtn.addEventListener('mouseleave', () => { selectBtn.style.background = 'rgba(var(--accent-rgb),0.1)'; });
@@ -10027,7 +10027,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
           item.setAttribute('data-nav-item', '');
           item.style.cssText = 'display:flex; align-items:center; gap:10px; padding:9px 16px; cursor:pointer; transition:background 0.1s; font-size:13px;';
           item.innerHTML = `
-            <svg viewBox="0 0 24 24" width="16" height="16" style="color:#a5b4fc;">${ICON_BEADS}</svg>
+            <svg viewBox="0 0 24 24" width="16" height="16" style="color:#e8a882;">${ICON_BEADS}</svg>
             <span style="flex:1; overflow:hidden;">
               <strong style="color:rgba(255,255,255,0.9);">${escapeHtml(proj.name)}</strong><br>
               <span style="opacity:0.4; font-size:11px;">${escapeHtml(proj.path)}</span>

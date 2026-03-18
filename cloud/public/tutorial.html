@@ -26,7 +26,7 @@
 
     .tut-logo {
       font-size: 32px; font-weight: 700;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6, #a855f7);
+      background: linear-gradient(135deg, #da7756, #c4603e, #b5472a);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
       margin-bottom: 16px;
     }
@@ -38,13 +38,13 @@
 
     .tut-start-btn {
       padding: 12px 36px; border-radius: 10px; border: none;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      background: linear-gradient(135deg, #da7756, #c4603e);
       color: white; font-size: 15px; font-weight: 600;
       cursor: pointer; font-family: inherit;
-      box-shadow: 0 6px 24px rgba(99, 102, 241, 0.35);
+      box-shadow: 0 6px 24px rgba(218, 119, 86, 0.35);
       transition: all 0.2s;
     }
-    .tut-start-btn:hover { box-shadow: 0 8px 32px rgba(99, 102, 241, 0.5); transform: translateY(-2px); }
+    .tut-start-btn:hover { box-shadow: 0 8px 32px rgba(218, 119, 86, 0.5); transform: translateY(-2px); }
 
     /* ─── Tutorial instruction prompt ─── */
     #tut-prompt {
@@ -52,7 +52,7 @@
       bottom: 24px; left: 50%; transform: translateX(-50%);
       width: min(520px, calc(100% - 48px));
       background: rgba(10, 15, 25, 0.97);
-      border: 1px solid rgba(99, 102, 241, 0.3);
+      border: 1px solid rgba(218, 119, 86, 0.3);
       border-radius: 14px;
       padding: 20px 24px;
       z-index: 100000;
@@ -75,7 +75,7 @@
     }
     .tut-progress-fill {
       height: 100%;
-      background: linear-gradient(90deg, #6366f1, #8b5cf6);
+      background: linear-gradient(90deg, #da7756, #c4603e);
       border-radius: 2px; transition: width 0.4s ease;
     }
     .tut-progress-label {
@@ -86,7 +86,7 @@
     .tut-chapter {
       font-size: 10px; text-transform: uppercase;
       letter-spacing: 0.1em; font-weight: 600;
-      color: rgba(99, 102, 241, 0.8);
+      color: rgba(218, 119, 86, 0.8);
       margin-bottom: 4px;
     }
 
@@ -102,7 +102,7 @@
       font-weight: 400; margin-bottom: 0;
     }
 
-    .tut-body .hl { color: #8b5cf6; font-weight: 500; }
+    .tut-body .hl { color: #c4603e; font-weight: 500; }
     .tut-body kbd {
       display: inline-block; padding: 1px 6px;
       background: rgba(255,255,255,0.08);
@@ -174,14 +174,14 @@
     @keyframes tut-glow-pulse-purple {
       0%, 100% {
         box-shadow:
-          0 0 15px rgba(99, 102, 241, 0.5),
+          0 0 15px rgba(218, 119, 86, 0.5),
           0 0 40px rgba(139, 92, 246, 0.2),
           0 0 80px rgba(139, 92, 246, 0.08);
         filter: brightness(1.1);
       }
       50% {
         box-shadow:
-          0 0 25px rgba(99, 102, 241, 0.7),
+          0 0 25px rgba(218, 119, 86, 0.7),
           0 0 60px rgba(139, 92, 246, 0.35),
           0 0 100px rgba(139, 92, 246, 0.15);
         filter: brightness(1.25);
@@ -201,7 +201,7 @@
 
     /* Menu item glow */
     .menu-item.tut-glow-item {
-      background: rgba(99, 102, 241, 0.15) !important;
+      background: rgba(218, 119, 86, 0.15) !important;
       animation: tut-glow-pulse-purple 1.5s ease-in-out infinite !important;
       border-radius: 8px;
     }
@@ -316,7 +316,7 @@
 
     /* Move mode visuals */
     .pane.move-mode-active {
-      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.8), 0 0 30px rgba(99, 102, 241, 0.3) !important;
+      box-shadow: 0 0 0 2px rgba(218, 119, 86, 0.8), 0 0 30px rgba(218, 119, 86, 0.3) !important;
       z-index: 999 !important;
     }
 
@@ -326,8 +326,8 @@
       bottom: auto;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(99, 102, 241, 0.15);
-      border: 1px solid rgba(99, 102, 241, 0.4);
+      background: rgba(218, 119, 86, 0.15);
+      border: 1px solid rgba(218, 119, 86, 0.4);
       color: rgba(167, 139, 250, 0.9);
       padding: 6px 16px;
       border-radius: 8px;
@@ -378,13 +378,13 @@
 
     .tut-cta {
       padding: 12px 32px; border-radius: 10px; border: none;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      background: linear-gradient(135deg, #da7756, #c4603e);
       color: white; font-size: 15px; font-weight: 600;
       cursor: pointer; font-family: inherit;
-      box-shadow: 0 6px 24px rgba(99, 102, 241, 0.35);
+      box-shadow: 0 6px 24px rgba(218, 119, 86, 0.35);
       transition: all 0.2s; text-decoration: none; display: inline-block;
     }
-    .tut-cta:hover { box-shadow: 0 8px 32px rgba(99, 102, 241, 0.5); transform: translateY(-2px); }
+    .tut-cta:hover { box-shadow: 0 8px 32px rgba(218, 119, 86, 0.5); transform: translateY(-2px); }
 
     /* ─── Home button (abandon tutorial) ─── */
     #tut-home-btn {
@@ -1878,7 +1878,7 @@ ${GIT_IND}<span class="${M}">●</span> <span class="${M}">0c8d2f5</span> <span 
           const isTargetFolder = (path === '~/projects/49agents');
           const scanGlow = isTargetFolder ? `${GLOW_STYLE}animation:tut-glow-pulse-purple 1.5s ease-in-out infinite;` : '';
           html += `<div id="tut-scan-btn" data-nav-item style="display:flex;align-items:center;gap:10px;padding:9px 16px;cursor:pointer;transition:background 0.1s,box-shadow 0.3s;font-size:13px;background:rgba(99,102,241,0.1);border-bottom:1px solid rgba(255,255,255,0.05);${scanGlow}">
-            <span style="color:#6366f1;">✓</span>
+            <span style="color:#da7756;">✓</span>
             <span style="color:#a5b4fc;font-weight:500;">Scan this folder for repos</span>
           </div>`;
 
