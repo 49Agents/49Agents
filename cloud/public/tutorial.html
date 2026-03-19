@@ -46,6 +46,19 @@
     }
     .tut-start-btn:hover { box-shadow: 0 8px 32px rgba(218, 119, 86, 0.5); transform: translateY(-2px); }
 
+    .tut-skip-btn {
+      display: block;
+      margin: 16px auto 0;
+      background: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.3);
+      font-size: 13px;
+      font-family: 'JetBrains Mono', monospace;
+      cursor: pointer;
+      transition: color 0.15s;
+    }
+    .tut-skip-btn:hover { color: rgba(255, 255, 255, 0.6); }
+
     /* ─── Tutorial instruction prompt ─── */
     #tut-prompt {
       position: fixed;
@@ -470,6 +483,7 @@
         Let's walk through setting up your workspace.
       </div>
       <button class="tut-start-btn" id="tut-start-btn">Start Tour</button>
+      <button class="tut-skip-btn" id="tut-skip-btn">Skip tutorial</button>
     </div>
   </div>
 
@@ -501,6 +515,13 @@
     </svg>
     Home
   </a>
+
+  <script>
+    document.getElementById('tut-skip-btn').addEventListener('click', function() {
+      try { localStorage.setItem('tc_tutorial', 'completed'); } catch (e) {}
+      window.location.href = '/';
+    });
+  </script>
 
   <!-- ═══ Guide scripts (loaded before engine) ═══ -->
   <script src="tutorial-getting-started.min.js"></script>
