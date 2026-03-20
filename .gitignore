@@ -12,3 +12,6 @@ cloud/public/*.min.js
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# Deploy scripts (contain server credentials)
+scripts/
