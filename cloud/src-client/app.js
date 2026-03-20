@@ -5870,6 +5870,13 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
 
     // Re-attach — agent will re-capture history, send it, then force redraw
     attachTerminal(pane);
+
+    // Clear stale scrollback after history replay + tmux repaint settles.
+    // Without this, history creates baseY>0 which breaks TUI scroll.
+    setTimeout(() => {
+      const ti = terminals.get(pane.id);
+      if (ti) ti.xterm.clear();
+    }, 1000);
   }
 
   // Render a single pane with terminal
