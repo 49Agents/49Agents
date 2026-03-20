@@ -1,10 +1,11 @@
 import { randomUUID } from 'crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, realpathSync } from 'fs';
-import { join, relative } from 'path';
+import { join, relative, resolve } from 'path';
 import { homedir } from 'os';
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import { config } from '../src/config.js';
+import { validateWorkingDirectory } from './sanitize.js';
 
 const execAsync = promisify(exec);
 
@@ -49,6 +50,7 @@ let gitGraphsCache = loadGitGraphs();
  * Returns commit objects with parent hashes so the client can render an SVG graph.
  */
 async function fetchGraphData(repoPath, maxCommits = 50) {
+  validateWorkingDirectory(resolve(repoPath));
   const opts = { cwd: repoPath, encoding: 'utf-8', timeout: 15000 };
   // Use a delimiter unlikely to appear in commit messages
   const SEP = '‡‡';
@@ -223,6 +225,7 @@ export const gitGraphService = {
   },
 
   createGitGraph({ repoPath, position, size, device }) {
+    validateWorkingDirectory(resolve(repoPath));
     const id = randomUUID();
     const name = repoPath.split('/').pop();
     const gitGraph = {
@@ -249,6 +252,7 @@ export const gitGraphService = {
     const gitGraph = gitGraphsCache[index];
     // Position/size now handled by cloud-only storage
     if (updates.repoPath) {
+      validateWorkingDirectory(resolve(updates.repoPath));
       gitGraph.repoPath = updates.repoPath;
       gitGraph.repoName = updates.repoPath.split('/').pop();
     }

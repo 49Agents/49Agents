@@ -344,6 +344,7 @@ export function createMessageRouter(sendToRelay, options = {}) {
           if (!repoPath) {
             return respond(400, { error: 'repoPath is required' });
           }
+          expandAndValidatePath(repoPath);
           const gitGraph = gitGraphService.createGitGraph({ repoPath, position, device, size });
           return respond(200, gitGraph);
         }
@@ -567,12 +568,17 @@ export function createMessageRouter(sendToRelay, options = {}) {
         const id = gitGraphPushMatch[1];
         const gitGraph = gitGraphService.getGitGraph(id);
         if (!gitGraph) return respond(404, { error: 'Git graph pane not found' });
+        expandAndValidatePath(gitGraph.repoPath);
         try {
-          const { stdout, stderr } = await execAsync('git push origin HEAD 2>&1', {
-            cwd: gitGraph.repoPath,
-            encoding: 'utf-8',
-            timeout: 30000,
-          });
+          // Use -c overrides to neutralize malicious git config values
+          const { stdout, stderr } = await execAsync(
+            'git -c core.pager=cat -c core.sshCommand=ssh -c core.fsmonitor= -c core.hooksPath= push origin HEAD 2>&1',
+            {
+              cwd: gitGraph.repoPath,
+              encoding: 'utf-8',
+              timeout: 30000,
+            }
+          );
           return respond(200, { success: true, output: (stdout || stderr || '').trim() });
         } catch (error) {
           const stderr = error.stderr || error.stdout || error.message;
@@ -586,7 +592,10 @@ export function createMessageRouter(sendToRelay, options = {}) {
         if (method === 'PATCH') {
           const updates = {};
           // Position/size now handled by cloud-only storage
-          if (body.repoPath !== undefined) updates.repoPath = body.repoPath;
+          if (body.repoPath !== undefined) {
+            expandAndValidatePath(body.repoPath);
+            updates.repoPath = body.repoPath;
+          }
           gitGraphService.updateGitGraph(id, updates);
           return respond(200, { success: true });
         }

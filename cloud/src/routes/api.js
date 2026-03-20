@@ -12,6 +12,32 @@ const pendingPairings = new Map(); // code -> { userId, hostname, os, version, s
 
 const PAIRING_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
+// ---------------------------------------------------------------------------
+// Rate limiter for pair-status endpoint (unauthenticated, brute-force target)
+// Allows 5 requests per 10 seconds per IP
+// ---------------------------------------------------------------------------
+const pairStatusRequests = new Map(); // ip -> { count, windowStart }
+const PAIR_RATE_WINDOW_MS = 10_000;
+const PAIR_RATE_MAX = 5;
+
+setInterval(() => {
+  const cutoff = Date.now() - PAIR_RATE_WINDOW_MS * 2;
+  for (const [ip, entry] of pairStatusRequests) {
+    if (entry.windowStart < cutoff) pairStatusRequests.delete(ip);
+  }
+}, 60_000);
+
+function checkPairRateLimit(ip) {
+  const now = Date.now();
+  const entry = pairStatusRequests.get(ip);
+  if (!entry || (now - entry.windowStart) > PAIR_RATE_WINDOW_MS) {
+    pairStatusRequests.set(ip, { count: 1, windowStart: now });
+    return true;
+  }
+  entry.count++;
+  return entry.count <= PAIR_RATE_MAX;
+}
+
 /**
  * Generate a 6-character uppercase alphanumeric pairing code.
  */
@@ -239,6 +265,11 @@ export function setupApiRoutes(app) {
 
   // GET /api/agents/pair-status — Agent polls this to check if pairing was approved
   app.get('/api/agents/pair-status', (req, res) => {
+    const ip = req.ip || 'unknown';
+    if (!checkPairRateLimit(ip)) {
+      return res.status(429).json({ error: 'Too many requests' });
+    }
+
     const { code } = req.query;
 
     if (!code) {
