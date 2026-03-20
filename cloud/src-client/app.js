@@ -9333,7 +9333,7 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
             // The resize message already tells tmux to repaint at the new size.
             setTimeout(() => {
               const ti = terminals.get(paneData.id);
-              if (ti) ti.xterm.clearScrollback();
+              if (ti) ti.xterm.clear();
             }, 500);
           } catch (e) {
             // Ignore fit errors
