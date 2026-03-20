@@ -8197,7 +8197,25 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
         return;
       }
 
-      // Normal mode — manually scroll the scrollback
+      // Alternate screen buffer without mouse reporting (nano, vim default, less, man, etc.)
+      // — send arrow key sequences so the app scrolls its content
+      if (xterm.buffer.active === xterm.buffer.alternate) {
+        const count = Math.abs(
+          e.deltaMode === 1
+            ? Math.round(e.deltaY * 1.125)
+            : Math.round(e.deltaY / 33) || (e.deltaY > 0 ? 1 : -1)
+        );
+        const arrow = e.deltaY > 0 ? '\x1b[B' : '\x1b[A'; // Down : Up
+        const termRef = terminals.get(paneData.id);
+        if (termRef?._attached) {
+          const seq = arrow.repeat(count);
+          const encoded = btoa(unescape(encodeURIComponent(seq)));
+          sendWs('terminal:input', { terminalId: paneData.id, data: encoded }, paneData.agentId);
+        }
+        return;
+      }
+
+      // Normal buffer — scroll the scrollback
       const lines = e.deltaMode === 1
         ? Math.round(e.deltaY * 1.125)
         : Math.round(e.deltaY / 33) || (e.deltaY > 0 ? 1 : -1);
