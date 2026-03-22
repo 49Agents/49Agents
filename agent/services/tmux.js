@@ -448,6 +448,17 @@ export class TmuxService {
     if (!terminal) return '';
 
     try {
+      // Check if the pane is in alternate screen mode (vim, nano, htop, etc.)
+      // TUI apps don't need scrollback history — skip capture entirely to
+      // prevent stale scrollback that breaks scroll behavior after reattach.
+      const { stdout: altOn } = await execAsync(
+        `tmux display-message -p -t ${escapeShellArg(terminal.tmuxSession)} '#{alternate_on}'`,
+        { timeout: 2000 }
+      );
+      if (altOn.trim() === '1') {
+        return '';
+      }
+
       // -e = include ANSI escape sequences (colors), -p = print to stdout
       // -S - = from start of history, -E -1 = stop before the visible screen
       //   (ttyd sends the visible screen naturally, so we only need scrollback)
