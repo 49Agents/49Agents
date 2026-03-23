@@ -316,8 +316,7 @@ export class TmuxService {
         terminals.set(id, terminal);
         // Configure tmux for restored sessions
         await execAsync(`tmux set-option -t ${escapeShellArg(session)} status off 2>/dev/null || true`);
-        // mouse mode intentionally OFF — see createTerminal comment
-        await execAsync(`tmux set-option -t ${escapeShellArg(session)} mouse off 2>/dev/null || true`);
+        await execAsync(`tmux set-option -t ${escapeShellArg(session)} mouse on 2>/dev/null || true`);
         await execAsync(`tmux set-option -t ${escapeShellArg(session)} history-limit 50000 2>/dev/null || true`);
       }
 
@@ -356,8 +355,7 @@ export class TmuxService {
 
     // Configure tmux for this session
     await execAsync(`tmux set-option -t ${escapeShellArg(sessionName)} status off 2>/dev/null || true`);
-    // NOTE: mouse mode intentionally OFF — it disables xterm.js text selection.
-    // Scroll-through-history is handled by forwarding wheel events as SGR sequences from the client.
+    await execAsync(`tmux set-option -t ${escapeShellArg(sessionName)} mouse on 2>/dev/null || true`);
     await execAsync(`tmux set-option -t ${escapeShellArg(sessionName)} history-limit 50000 2>/dev/null || true`);
 
     const terminal = {

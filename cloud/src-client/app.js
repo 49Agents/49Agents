@@ -8172,39 +8172,17 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
 
     // Ctrl+scroll = canvas zoom. Normal scroll = xterm buffer scroll.
     // When a TUI app (opencode, vim, htop, etc.) enables mouse reporting,
-    // re-dispatch the wheel event on xterm's viewport so xterm.js sends
-    // mouse escape sequences to the running application.
-    const XTERM_WHEEL = Symbol('xterm-wheel');
+    // Ctrl+scroll = canvas zoom (must intercept before xterm sees it).
+    // All other scroll is handled natively by xterm.js — with tmux mouse
+    // mode enabled, xterm sends mouse sequences to tmux which handles
+    // scrollback for normal shells and forwards to TUI apps correctly.
     container.addEventListener('wheel', (e) => {
-      // Skip re-dispatched events from ourselves
-      if (e[XTERM_WHEEL]) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
       if (e.ctrlKey) {
+        e.preventDefault();
+        e.stopPropagation();
         const delta = e.deltaY > 0 ? 0.9 : 1.1;
         setZoom(state.zoom * delta, e.clientX, e.clientY);
-        return;
       }
-
-      // TUI app has mouse reporting enabled (htop, opencode, vim with mouse=a)
-      // — re-dispatch to xterm's element so it sends mouse sequences to the app
-      if (xterm._core?.coreMouseService?.areMouseEventsActive) {
-        const xtermEl = container.querySelector('.xterm-screen');
-        if (xtermEl) {
-          const clone = new WheelEvent('wheel', e);
-          Object.defineProperty(clone, XTERM_WHEEL, { value: true });
-          xtermEl.dispatchEvent(clone);
-        }
-        return;
-      }
-
-      // Default: scroll through xterm's buffer
-      const lines = e.deltaMode === 1
-        ? Math.round(e.deltaY * 1.125)
-        : Math.round(e.deltaY / 33) || (e.deltaY > 0 ? 1 : -1);
-      xterm.scrollLines(lines);
     }, { passive: false, capture: true });
 
     // Store terminal info first
