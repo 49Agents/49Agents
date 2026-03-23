@@ -2555,6 +2555,11 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
 
     // Update DOM (original logic)
     for (const [terminalId, info] of Object.entries(states)) {
+      // Track alternate screen state from tmux (authoritative source)
+      const termInfo = terminals.get(terminalId);
+      if (termInfo && info) {
+        termInfo._alternateOn = !!info.alternateOn;
+      }
       // Track claude terminals for HUD counts
       if (info && info.isClaude) claudeTerminalIds.add(terminalId);
       else claudeTerminalIds.delete(terminalId);
@@ -5868,7 +5873,9 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
     termInfo._historyLoaded = false;
     termInfo._initialAttachDone = false;
 
-    // Re-attach — agent will re-capture history, send it, then force redraw
+    // Re-attach — agent will re-capture history, send it, then force redraw.
+    // Agent skips history capture when a TUI app is in alternate screen mode,
+    // so no stale scrollback is created.
     attachTerminal(pane);
   }
 
@@ -8169,20 +8176,57 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
     });
 
     // Ctrl+scroll = canvas zoom. Normal scroll = xterm buffer scroll.
-    // We must intercept normal scroll because tmux uses alternate screen buffer,
-    // which makes xterm send arrow keys instead of scrolling its own buffer.
+    // When a TUI app (opencode, vim, htop, etc.) enables mouse reporting,
+    // re-dispatch the wheel event on xterm's viewport so xterm.js sends
+    // mouse escape sequences to the running application.
+    // When a TUI app is in alternate screen (reported by tmux via claude:states),
+    // send arrow keys so the app receives scroll as navigation.
+    const XTERM_WHEEL = Symbol('xterm-wheel');
     container.addEventListener('wheel', (e) => {
+      // Skip re-dispatched events from ourselves
+      if (e[XTERM_WHEEL]) return;
+
       e.preventDefault();
       e.stopPropagation();
+
       if (e.ctrlKey) {
         const delta = e.deltaY > 0 ? 0.9 : 1.1;
         setZoom(state.zoom * delta, e.clientX, e.clientY);
-      } else {
-        const lines = e.deltaMode === 1
-          ? Math.round(e.deltaY * 1.125)
-          : Math.round(e.deltaY / 33) || (e.deltaY > 0 ? 1 : -1);
-        xterm.scrollLines(lines);
+        return;
       }
+
+      // TUI app has mouse reporting enabled (htop, opencode, vim with mouse=a)
+      // — re-dispatch to xterm's element so it sends mouse sequences to the app
+      if (xterm._core?.coreMouseService?.areMouseEventsActive) {
+        const xtermEl = container.querySelector('.xterm-screen');
+        if (xtermEl) {
+          const clone = new WheelEvent('wheel', e);
+          Object.defineProperty(clone, XTERM_WHEEL, { value: true });
+          xtermEl.dispatchEvent(clone);
+        }
+        return;
+      }
+
+      const lines = e.deltaMode === 1
+        ? Math.round(e.deltaY * 1.125)
+        : Math.round(e.deltaY / 33) || (e.deltaY > 0 ? 1 : -1);
+
+      // TUI app in alternate screen (tmux reports this via claude:states polling)
+      // — send arrow keys so the app scrolls its content
+      const termRef = terminals.get(paneData.id);
+      if (termRef?._alternateOn) {
+        const count = Math.abs(lines);
+        const arrow = e.deltaY > 0 ? '\x1b[B' : '\x1b[A';
+        if (termRef._attached) {
+          const seq = arrow.repeat(count);
+          const encoded = btoa(unescape(encodeURIComponent(seq)));
+          sendWs('terminal:input', { terminalId: paneData.id, data: encoded }, paneData.agentId);
+        }
+        return;
+      }
+
+      // Normal shell — scroll through xterm's buffer
+      xterm.scrollLines(lines);
     }, { passive: false, capture: true });
 
     // Store terminal info first
@@ -9280,11 +9324,6 @@ import { WebLinksAddon } from './lib/addon-web-links.mjs';
               pixelWidth: paneData.width,
               pixelHeight: paneData.height
             }, paneData.agentId);
-            // Re-attach after resize to get clean history + live screen.
-            // Delay slightly so tmux has time to process the new dimensions.
-            setTimeout(() => {
-              reattachTerminal(paneData);
-            }, 300);
           } catch (e) {
             // Ignore fit errors
           }

@@ -448,6 +448,17 @@ export class TmuxService {
     if (!terminal) return '';
 
     try {
+      // Check if the pane is in alternate screen mode (vim, nano, htop, etc.)
+      // TUI apps don't need scrollback history — skip capture entirely to
+      // prevent stale scrollback that breaks scroll behavior after reattach.
+      const { stdout: altOn } = await execAsync(
+        `tmux display-message -p -t ${escapeShellArg(terminal.tmuxSession)} '#{alternate_on}'`,
+        { timeout: 2000 }
+      );
+      if (altOn.trim() === '1') {
+        return '';
+      }
+
       // -e = include ANSI escape sequences (colors), -p = print to stdout
       // -S - = from start of history, -E -1 = stop before the visible screen
       //   (ttyd sends the visible screen naturally, so we only need scrollback)
@@ -560,17 +571,17 @@ export class TmuxService {
     const results = {};
     try {
       const { stdout } = await execAsync(
-        `tmux list-panes -a -F "#{session_name}|#{pane_current_command}|#{pane_current_path}|#{pane_active}|#{pane_pid}" 2>/dev/null`
+        `tmux list-panes -a -F "#{session_name}|#{pane_current_command}|#{pane_current_path}|#{pane_active}|#{pane_pid}|#{alternate_on}" 2>/dev/null`
       );
       for (const line of stdout.trim().split('\n')) {
         if (!line || !line.startsWith('tc2-')) continue;
         const parts = line.split('|');
-        if (parts.length < 5) continue;
-        const [session, command, cwd, active, pid] = parts;
+        if (parts.length < 6) continue;
+        const [session, command, cwd, active, pid, altOn] = parts;
         if (active !== '1') continue; // Only active panes
         const id = session.replace('tc2-', '');
         if (!terminals.has(id)) continue;
-        results[id] = { session, command, cwd, pid, isClaude: /^claude/i.test(command) };
+        results[id] = { session, command, cwd, pid, isClaude: /^claude/i.test(command), alternateOn: altOn === '1' };
       }
     } catch {
       // Silently fail - returns empty results
@@ -683,7 +694,7 @@ export class TmuxService {
     for (const [id] of terminals) {
       const info = sessionInfo[id];
       if (!info) {
-        results[id] = { isClaude: false, state: null, cwd: null };
+        results[id] = { isClaude: false, state: null, cwd: null, alternateOn: false };
       } else if (!info.isClaude) {
         nonClaudeIds.push(id);
       }
@@ -720,7 +731,7 @@ export class TmuxService {
     for (const id of nonClaudeIds) {
       const info = sessionInfo[id];
       if (!info.isClaude) {
-        results[id] = { isClaude: false, state: null, cwd: info.cwd || null };
+        results[id] = { isClaude: false, state: null, cwd: info.cwd || null, alternateOn: info.alternateOn };
       }
     }
 
@@ -738,12 +749,12 @@ export class TmuxService {
         const location = await this.getCachedLocation(info.cwd);
         const claudeSessionId = await this.resolveClaudeSessionForPane(info.pid);
         const claudeSessionName = await resolveClaudeSessionName(claudeSessionId, info.cwd);
-        return [id, { isClaude: true, state, command: 'claude', location, cwd: info.cwd, claudeSessionId, claudeSessionName }];
+        return [id, { isClaude: true, state, command: 'claude', location, cwd: info.cwd, claudeSessionId, claudeSessionName, alternateOn: info.alternateOn }];
       } catch {
         const location = await this.getCachedLocation(info.cwd);
         const claudeSessionId = await this.resolveClaudeSessionForPane(info.pid);
         const claudeSessionName = await resolveClaudeSessionName(claudeSessionId, info.cwd);
-        return [id, { isClaude: true, state: 'working', command: 'claude', location, cwd: info.cwd, claudeSessionId, claudeSessionName }];
+        return [id, { isClaude: true, state: 'working', command: 'claude', location, cwd: info.cwd, claudeSessionId, claudeSessionName, alternateOn: info.alternateOn }];
       }
     });
 
