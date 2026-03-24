@@ -458,13 +458,249 @@ cmd_agent_stop() {
   kill_by_pidfile "$AGENT_PID_FILE" "Agent"
 }
 
+# ── Session / State Commands ──
+
+AGENT_CONFIG_DIR="$HOME/.49agents"
+AGENT_TOKEN_FILE="$AGENT_CONFIG_DIR/agent.json"
+AGENT_TERMINALS_FILE="$AGENT_CONFIG_DIR/terminals.json"
+CLOUD_DB_FILE="$SCRIPT_DIR/cloud/data/tc.db"
+
+cmd_session() {
+  echo ""
+  echo -e "${BOLD}49Agents Session State${NC}"
+  echo "-----------------------------"
+  echo ""
+
+  # Agent auth token
+  echo -e "${BOLD}Agent Identity${NC}  ${DIM}($AGENT_TOKEN_FILE)${NC}"
+  if [ -f "$AGENT_TOKEN_FILE" ]; then
+    local saved_at
+    saved_at=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$AGENT_TOKEN_FILE','utf8')).savedAt)}catch{console.log('unknown')}" 2>/dev/null)
+    echo -e "  Token:    ${GREEN}present${NC}"
+    echo -e "  Saved at: ${saved_at}"
+    echo -e "  ${DIM}This token is how the agent authenticates with the cloud server.${NC}"
+    echo -e "  ${DIM}It persists across restarts so you don't need to re-pair each time.${NC}"
+  else
+    echo -e "  Token:    ${RED}not found${NC}"
+    echo -e "  ${DIM}The agent has no saved token. It will need to pair on next start.${NC}"
+  fi
+  echo ""
+
+  # Agent terminal state
+  echo -e "${BOLD}Terminal State${NC}  ${DIM}($AGENT_TERMINALS_FILE)${NC}"
+  if [ -f "$AGENT_TERMINALS_FILE" ]; then
+    local count
+    count=$(node -e "try{const d=JSON.parse(require('fs').readFileSync('$AGENT_TERMINALS_FILE','utf8'));console.log(Array.isArray(d)?d.length:Object.keys(d).length)}catch{console.log(0)}" 2>/dev/null)
+    echo -e "  Tracked terminals: ${CYAN}${count}${NC}"
+    echo -e "  ${DIM}These are tmux sessions the agent knows about. They persist so${NC}"
+    echo -e "  ${DIM}terminals survive agent restarts and show up in the browser.${NC}"
+  else
+    echo -e "  Tracked terminals: ${DIM}none${NC}"
+  fi
+  echo ""
+
+  # Cloud database
+  echo -e "${BOLD}Cloud Database${NC}  ${DIM}($CLOUD_DB_FILE)${NC}"
+  if [ -f "$CLOUD_DB_FILE" ]; then
+    local db_size
+    db_size=$(du -h "$CLOUD_DB_FILE" | cut -f1)
+    echo -e "  Database: ${GREEN}present${NC} (${db_size})"
+
+    # Query some stats
+    local user_count agent_count pane_count note_count
+    user_count=$(sqlite3 "$CLOUD_DB_FILE" "SELECT COUNT(*) FROM users;" 2>/dev/null || echo "?")
+    agent_count=$(sqlite3 "$CLOUD_DB_FILE" "SELECT COUNT(*) FROM agents;" 2>/dev/null || echo "?")
+    pane_count=$(sqlite3 "$CLOUD_DB_FILE" "SELECT COUNT(*) FROM pane_layouts;" 2>/dev/null || echo "?")
+    note_count=$(sqlite3 "$CLOUD_DB_FILE" "SELECT COUNT(*) FROM notes;" 2>/dev/null || echo "?")
+    echo -e "  Users:  ${user_count}   Agents: ${agent_count}   Panes: ${pane_count}   Notes: ${note_count}"
+    echo -e "  ${DIM}Stores users, agent registrations, pane layouts, notes, and preferences.${NC}"
+  else
+    echo -e "  Database: ${DIM}not created yet${NC} (created on first server start)"
+  fi
+  echo ""
+
+  # tmux sessions
+  echo -e "${BOLD}tmux Sessions${NC}"
+  if command -v tmux &>/dev/null; then
+    local tmux_sessions
+    tmux_sessions=$(tmux list-sessions 2>/dev/null || true)
+    if [ -n "$tmux_sessions" ]; then
+      echo "$tmux_sessions" | while IFS= read -r line; do
+        echo -e "  ${CYAN}${line}${NC}"
+      done
+    else
+      echo -e "  ${DIM}No active tmux sessions${NC}"
+    fi
+  else
+    echo -e "  ${DIM}tmux not installed${NC}"
+  fi
+  echo ""
+
+  # 49ctl config
+  echo -e "${BOLD}49ctl Config${NC}  ${DIM}($CONFIG_FILE)${NC}"
+  if [ -f "$CONFIG_FILE" ]; then
+    load_config
+    echo -e "  Cloud:    ${RUN_CLOUD}  (port ${CLOUD_PORT})"
+    echo -e "  Agent:    ${RUN_AGENT}  (relay ${AGENT_CLOUD_URL})"
+  else
+    echo -e "  ${DIM}Not configured yet. Run ./49ctl setup${NC}"
+  fi
+  echo ""
+
+  # Log files
+  echo -e "${BOLD}Log Files${NC}"
+  if [ -f "$CLOUD_LOG" ]; then
+    local cloud_log_size
+    cloud_log_size=$(du -h "$CLOUD_LOG" | cut -f1)
+    echo -e "  Cloud log: ${cloud_log_size}  ${DIM}($CLOUD_LOG)${NC}"
+  else
+    echo -e "  Cloud log: ${DIM}not created${NC}"
+  fi
+  if [ -f "$AGENT_LOG" ]; then
+    local agent_log_size
+    agent_log_size=$(du -h "$AGENT_LOG" | cut -f1)
+    echo -e "  Agent log: ${agent_log_size}  ${DIM}($AGENT_LOG)${NC}"
+  else
+    echo -e "  Agent log: ${DIM}not created${NC}"
+  fi
+  echo ""
+}
+
+cmd_reset_agent() {
+  echo ""
+  echo -e "${BOLD}Reset Agent Identity${NC}"
+  echo ""
+  echo "This will:"
+  echo "  1. Stop the agent if running"
+  echo "  2. Delete the auth token ($AGENT_TOKEN_FILE)"
+  echo "  3. The agent will need to re-pair with the cloud on next start"
+  echo ""
+  read -rp "Continue? [y/N]: " CONFIRM
+  if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    echo "Cancelled."
+    return
+  fi
+
+  # Stop agent
+  if [ -f "$AGENT_PID_FILE" ]; then
+    kill_by_pidfile "$AGENT_PID_FILE" "Agent"
+  fi
+
+  # Delete token
+  if [ -f "$AGENT_TOKEN_FILE" ]; then
+    rm -f "$AGENT_TOKEN_FILE"
+    echo -e "  ${GREEN}Agent token deleted.${NC}"
+  else
+    echo -e "  No token file found."
+  fi
+  echo ""
+}
+
+cmd_reset_terminals() {
+  echo ""
+  echo -e "${BOLD}Reset Terminal State${NC}"
+  echo ""
+  echo "This will:"
+  echo "  1. Delete the terminal tracking file ($AGENT_TERMINALS_FILE)"
+  echo "  2. The agent will re-discover tmux sessions on next start"
+  echo "  3. Existing tmux sessions are NOT killed (just forgotten)"
+  echo ""
+  read -rp "Continue? [y/N]: " CONFIRM
+  if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    echo "Cancelled."
+    return
+  fi
+
+  if [ -f "$AGENT_TERMINALS_FILE" ]; then
+    rm -f "$AGENT_TERMINALS_FILE"
+    echo -e "  ${GREEN}Terminal state cleared.${NC}"
+  else
+    echo -e "  No terminal state file found."
+  fi
+  echo ""
+}
+
+cmd_reset_db() {
+  echo ""
+  echo -e "${BOLD}Reset Cloud Database${NC}"
+  echo ""
+  echo -e "${RED}WARNING: This will delete ALL cloud data:${NC}"
+  echo "  - User accounts and preferences"
+  echo "  - Agent registrations"
+  echo "  - Pane layouts and positions"
+  echo "  - Notes"
+  echo "  - Event history"
+  echo ""
+  echo "The database will be recreated fresh on next server start."
+  echo ""
+  read -rp "Type 'reset' to confirm: " CONFIRM
+  if [ "$CONFIRM" != "reset" ]; then
+    echo "Cancelled."
+    return
+  fi
+
+  # Stop cloud server first
+  if [ -f "$CLOUD_PID_FILE" ]; then
+    kill_by_pidfile "$CLOUD_PID_FILE" "Cloud server"
+  fi
+
+  if [ -f "$CLOUD_DB_FILE" ]; then
+    rm -f "$CLOUD_DB_FILE" "${CLOUD_DB_FILE}-wal" "${CLOUD_DB_FILE}-shm"
+    echo -e "  ${GREEN}Database deleted.${NC}"
+  else
+    echo -e "  No database found."
+  fi
+  echo ""
+}
+
+cmd_reset_all() {
+  echo ""
+  echo -e "${BOLD}Full Reset${NC}"
+  echo ""
+  echo -e "${RED}WARNING: This will delete ALL persistent state:${NC}"
+  echo "  - Agent auth token (will need to re-pair)"
+  echo "  - Terminal tracking (agent re-discovers on start)"
+  echo "  - Cloud database (users, layouts, notes — all gone)"
+  echo "  - Log files"
+  echo "  - 49ctl config (will need to re-run setup)"
+  echo ""
+  echo "tmux sessions are NOT killed."
+  echo ""
+  read -rp "Type 'reset-all' to confirm: " CONFIRM
+  if [ "$CONFIRM" != "reset-all" ]; then
+    echo "Cancelled."
+    return
+  fi
+
+  # Stop everything first
+  cmd_stop
+
+  rm -f "$AGENT_TOKEN_FILE"
+  rm -f "$AGENT_TERMINALS_FILE"
+  rm -f "$CLOUD_DB_FILE" "${CLOUD_DB_FILE}-wal" "${CLOUD_DB_FILE}-shm"
+  rm -f "$CLOUD_LOG" "$AGENT_LOG"
+  rm -f "$CONFIG_FILE"
+
+  echo ""
+  echo -e "  ${GREEN}All state cleared.${NC}"
+  echo -e "  Run ${BOLD}./49ctl setup${NC} to start fresh."
+  echo ""
+}
+
+cmd_clear_logs() {
+  echo ""
+  > "$CLOUD_LOG" 2>/dev/null && echo -e "  ${GREEN}Cloud log cleared${NC}" || true
+  > "$AGENT_LOG" 2>/dev/null && echo -e "  ${GREEN}Agent log cleared${NC}" || true
+  echo ""
+}
+
 cmd_help() {
   echo ""
   echo -e "${BOLD}49ctl${NC} — 49Agents Process Manager"
   echo ""
   echo "Usage: ./49ctl <command> [options]"
   echo ""
-  echo "Commands:"
+  echo -e "${BOLD}Process Management:${NC}"
   echo "  setup          Interactive setup (port, single/multi machine)"
   echo "  start          Start services (based on setup config)"
   echo "  stop           Stop all running services"
@@ -473,10 +709,19 @@ cmd_help() {
   echo "  logs [service] Tail logs (cloud, agent, or all)"
   echo "  build          Rebuild client assets + agent tarball"
   echo ""
+  echo -e "${BOLD}Individual Services:${NC}"
   echo "  cloud-start    Start only the cloud server"
   echo "  cloud-stop     Stop only the cloud server"
   echo "  agent-start    Start only the agent"
   echo "  agent-stop     Stop only the agent"
+  echo ""
+  echo -e "${BOLD}Session & State:${NC}"
+  echo "  session        Show all persistent state (tokens, DB, terminals, config)"
+  echo "  reset-agent    Delete agent auth token (forces re-pairing)"
+  echo "  reset-terminals  Clear terminal tracking (agent re-discovers on start)"
+  echo "  reset-db       Delete cloud database (users, layouts, notes)"
+  echo "  reset-all      Delete ALL persistent state (full fresh start)"
+  echo "  clear-logs     Truncate log files"
   echo ""
   echo "  help           Show this help"
   echo ""
@@ -489,18 +734,24 @@ COMMAND="${1:-help}"
 shift 2>/dev/null || true
 
 case "$COMMAND" in
-  setup)        cmd_setup ;;
-  start)        cmd_start ;;
-  stop)         cmd_stop ;;
-  restart)      cmd_restart ;;
-  status)       cmd_status ;;
-  logs)         cmd_logs "$@" ;;
-  build)        cmd_build ;;
-  cloud-start)  cmd_cloud_start ;;
-  cloud-stop)   cmd_cloud_stop ;;
-  agent-start)  cmd_agent_start ;;
-  agent-stop)   cmd_agent_stop ;;
-  help|--help|-h) cmd_help ;;
+  setup)           cmd_setup ;;
+  start)           cmd_start ;;
+  stop)            cmd_stop ;;
+  restart)         cmd_restart ;;
+  status)          cmd_status ;;
+  logs)            cmd_logs "$@" ;;
+  build)           cmd_build ;;
+  cloud-start)     cmd_cloud_start ;;
+  cloud-stop)      cmd_cloud_stop ;;
+  agent-start)     cmd_agent_start ;;
+  agent-stop)      cmd_agent_stop ;;
+  session)         cmd_session ;;
+  reset-agent)     cmd_reset_agent ;;
+  reset-terminals) cmd_reset_terminals ;;
+  reset-db)        cmd_reset_db ;;
+  reset-all)       cmd_reset_all ;;
+  clear-logs)      cmd_clear_logs ;;
+  help|--help|-h)  cmd_help ;;
   *)
     echo -e "${RED}Unknown command: ${COMMAND}${NC}"
     cmd_help
