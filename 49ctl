@@ -490,12 +490,34 @@ cmd_session() {
   echo -e "${BOLD}Terminal State${NC}  ${DIM}($AGENT_TERMINALS_FILE)${NC}"
   if [ -f "$AGENT_TERMINALS_FILE" ]; then
     local count
-    count=$(node -e "try{const d=JSON.parse(require('fs').readFileSync('$AGENT_TERMINALS_FILE','utf8'));console.log(Array.isArray(d)?d.length:Object.keys(d).length)}catch{console.log(0)}" 2>/dev/null)
-    echo -e "  Tracked terminals: ${CYAN}${count}${NC}"
-    echo -e "  ${DIM}These are tmux sessions the agent knows about. They persist so${NC}"
-    echo -e "  ${DIM}terminals survive agent restarts and show up in the browser.${NC}"
+    count=$(node -e "try{const d=JSON.parse(require('fs').readFileSync('$AGENT_TERMINALS_FILE','utf8'));const t=d.terminals||d;console.log(Array.isArray(t)?t.length:Object.keys(t).length)}catch{console.log(0)}" 2>/dev/null)
+    echo -e "  Saved in tracking file: ${CYAN}${count}${NC}"
+    echo -e "  ${DIM}The agent's record of tmux sessions it manages. Persists across${NC}"
+    echo -e "  ${DIM}restarts so panes reappear in the browser without re-creating them.${NC}"
   else
-    echo -e "  Tracked terminals: ${DIM}none${NC}"
+    echo -e "  Saved in tracking file: ${DIM}none${NC}"
+  fi
+  echo ""
+
+  # tmux sessions (moved up, next to terminal state for clarity)
+  echo -e "${BOLD}Live tmux Sessions${NC}"
+  if command -v tmux &>/dev/null; then
+    local tmux_count=0
+    local tmux_sessions
+    tmux_sessions=$(tmux list-sessions 2>/dev/null || true)
+    if [ -n "$tmux_sessions" ]; then
+      tmux_count=$(echo "$tmux_sessions" | wc -l | tr -d ' ')
+      echo -e "  Running: ${CYAN}${tmux_count}${NC}"
+      echo "$tmux_sessions" | while IFS= read -r line; do
+        echo -e "    ${DIM}${line}${NC}"
+      done
+      echo -e "  ${DIM}These are real OS processes. The agent discovers them on startup${NC}"
+      echo -e "  ${DIM}even if they aren't in the tracking file.${NC}"
+    else
+      echo -e "  Running: ${DIM}0${NC}"
+    fi
+  else
+    echo -e "  ${DIM}tmux not installed${NC}"
   fi
   echo ""
 
@@ -516,23 +538,6 @@ cmd_session() {
     echo -e "  ${DIM}Stores users, agent registrations, pane layouts, notes, and preferences.${NC}"
   else
     echo -e "  Database: ${DIM}not created yet${NC} (created on first server start)"
-  fi
-  echo ""
-
-  # tmux sessions
-  echo -e "${BOLD}tmux Sessions${NC}"
-  if command -v tmux &>/dev/null; then
-    local tmux_sessions
-    tmux_sessions=$(tmux list-sessions 2>/dev/null || true)
-    if [ -n "$tmux_sessions" ]; then
-      echo "$tmux_sessions" | while IFS= read -r line; do
-        echo -e "  ${CYAN}${line}${NC}"
-      done
-    else
-      echo -e "  ${DIM}No active tmux sessions${NC}"
-    fi
-  else
-    echo -e "  ${DIM}tmux not installed${NC}"
   fi
   echo ""
 
