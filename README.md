@@ -30,30 +30,41 @@ The **agent** runs on your machine and manages tmux sessions via ttyd. The **clo
 ```bash
 git clone https://github.com/49Agents/49Agents.git
 cd 49Agents
-./start.sh
+./49ctl setup    # interactive setup (one time)
+./49ctl start    # start cloud server + agent
 ```
 
-The setup script will:
-1. Install dependencies for both cloud and agent
-2. Build the client assets
-3. Ask whether you're running on a **single machine** or **multiple machines**
-4. Start everything and print the URL to open in your browser
+Open `http://localhost:1071` in your browser. No account, no login, no token needed for local use.
 
-No account, no login, no token needed for local use.
+## Managing Services
+
+```bash
+./49ctl start          # Start cloud + agent (based on setup config)
+./49ctl stop           # Stop everything cleanly
+./49ctl restart        # Stop + start
+./49ctl status         # Show what's running, PIDs, ports
+./49ctl logs           # Tail both cloud and agent logs
+./49ctl logs cloud     # Tail cloud logs only
+./49ctl logs agent     # Tail agent logs only
+./49ctl build          # Rebuild client assets + agent tarball
+
+./49ctl cloud-start    # Start only the cloud server
+./49ctl cloud-stop     # Stop only the cloud server
+./49ctl agent-start    # Start only the agent
+./49ctl agent-stop     # Stop only the agent
+```
+
+You can also use `./start.sh` for the original interactive setup-and-run experience.
 
 ## Single Machine Setup
 
-When prompted, choose **Single machine**. Enter a port (default: `1071`). Both the cloud server and agent start automatically.
-
-```
-Open http://localhost:1071 in your browser.
-```
+Run `./49ctl setup`, choose **Single machine**, enter a port (default: `1071`). Then `./49ctl start`.
 
 ## Multi-Machine Setup
 
 Run the cloud server on one machine and the agent on another (useful for accessing terminals from a laptop, tablet, or phone via a private network like [Tailscale](https://tailscale.com)).
 
-When prompted, choose **Multi machine**, then:
+Run `./49ctl setup`, choose **Multi machine**, then:
 
 - **Cloud only** — runs just the relay server. Choose a port. Open `http://<this-machine-ip>:<port>` from any device on your network.
 - **Agent only** — runs just the agent. Enter the WebSocket URL of your cloud server (e.g. `ws://192.168.1.10:1071`).
