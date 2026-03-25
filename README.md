@@ -87,13 +87,51 @@ When OAuth is configured, the server requires login. When it's not, it's open �
 
 ## Agent CLI
 
+The agent binary lives at `agent/bin/49-agent.js` (or `~/.49agents/agent/bin/49-agent.js` if installed remotely).
+
 ```
-49-agent start               Connect to relay (foreground)
-49-agent start --daemon      Connect to relay (background)
-49-agent config              Set a custom host/port for private network setups
-49-agent status              Show agent status
-49-agent stop                Stop background agent
-49-agent install-service     Show systemd/launchd install instructions
+49-agent start               Connect to relay (foreground, logs to stdout)
+49-agent start --daemon      Connect to relay (background, writes PID file)
+49-agent stop                Stop the background agent process
+49-agent status              Check if the agent is running and show PID
+49-agent config              Set a custom cloud server URL for private networks
+49-agent login <token>       Store an auth token (used during remote pairing)
+49-agent install-service     Print instructions to install as a system service
+```
+
+### Running the Agent as a System Service
+
+By default, the agent runs as a foreground process (via `./49ctl start` or `49-agent start`). If you want it to **auto-start on boot** and run permanently in the background, you can install it as a system service:
+
+```bash
+49-agent install-service
+```
+
+This prints copy-paste instructions for your OS (it does **not** install anything automatically):
+
+- **macOS (launchd)** — creates a plist at `~/Library/LaunchAgents/com.49agents.agent.plist`. The agent starts on login and restarts if it crashes.
+- **Linux (systemd)** — creates a user service at `~/.config/systemd/user/49-agent.service`. Same behavior: starts on login, auto-restarts on failure.
+
+This is optional. For local development, `./49ctl start` and `./49ctl stop` are all you need.
+
+## Session & State Management
+
+49Agents stores persistent state in several places. Use `./49ctl session` to see everything at a glance.
+
+| What | Where | Purpose |
+|------|-------|---------|
+| Agent auth token | `~/.49agents/agent.json` | Authenticates the agent with the cloud server. Persists across restarts so you don't re-pair each time. |
+| Terminal tracking | `~/.49agents/terminals.json` | Agent's record of which tmux sessions it manages. Panes reappear in the browser after an agent restart. |
+| Cloud database | `cloud/data/tc.db` | SQLite — stores users, agent registrations, pane layouts, notes, and preferences. |
+| Browser state | `localStorage` | Tutorial completion, UI drafts. Cleared by browser. |
+
+```bash
+./49ctl session            # Show all persistent state
+./49ctl reset-agent        # Delete auth token (forces re-pairing)
+./49ctl reset-terminals    # Clear terminal tracking (agent re-discovers on start)
+./49ctl reset-db           # Delete cloud database (users, layouts, notes)
+./49ctl reset-all          # Full state wipe (fresh start)
+./49ctl clear-logs         # Truncate log files
 ```
 
 ## Configuration
