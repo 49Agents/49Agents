@@ -6,7 +6,7 @@ let _ctx = null; // injected dependencies
 export function initMinimap(ctx) { _ctx = ctx; }
 
 // ── State ──
-let minimapEnabled = true;
+let minimapEnabled = window.innerWidth > 768; // disabled by default on phone
 let minimapVisible = false;
 let minimapRafId = null;
 let minimapEls = null;
