@@ -17,3 +17,7 @@ extensions/
 
 # Deploy scripts (contain server credentials)
 scripts/
+
+# E2E test artifacts
+tests/test-results/
+tests/test-report/

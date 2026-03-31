@@ -1,0 +1,22 @@
+{
+  "name": "49agents-e2e-tests",
+  "version": "1.0.0",
+  "description": "Your terminals on an infinite canvas. Pan, zoom, and arrange real terminal panes in a browser — powered by tmux.",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx playwright test --config tests/playwright.config.js",
+    "test:ui": "npx playwright test --config tests/playwright.config.js --ui",
+    "test:headed": "npx playwright test --config tests/playwright.config.js --headed",
+    "test:api": "npx playwright test --config tests/playwright.config.js tests/api.spec.js",
+    "test:canvas": "npx playwright test --config tests/playwright.config.js tests/canvas.spec.js",
+    "test:drag": "npx playwright test --config tests/playwright.config.js tests/drag-and-resize.spec.js",
+    "test:iframe": "npx playwright test --config tests/playwright.config.js tests/iframe-scroll.spec.js",
+    "test:report": "npx playwright show-report tests/test-report"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}
