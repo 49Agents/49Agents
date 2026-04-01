@@ -10,8 +10,13 @@ export function initGitGraphDeps(ctx) { _ctx = ctx; }
 
 // ── SVG Graph Constants ──
 const GG = {
-  ROW_H: 28, LANE_W: 16, NODE_R: 4, LEFT_PAD: 12,
-  COLORS: ['#85e89d','#79b8ff','#b392f0','#ffab70','#f97583','#4ec9b0','#d1bcf9','#ffd33d'],
+  ROW_H: 24, LANE_W: 16, NODE_R: 4, MERGE_R_OUTER: 5.5, MERGE_R_INNER: 2.5,
+  LEFT_PAD: 16, LINE_W: 2, SHADOW_W: 4,
+  // 12-color palette matching mhutchie/vscode-git-graph
+  COLORS: [
+    '#85e89d', '#0085d9', '#b392f0', '#d9008f', '#ffab70', '#00d90a',
+    '#f97583', '#d98500', '#4ec9b0', '#a300d9', '#ffd33d', '#dc5b23',
+  ],
 };
 
 export function renderGitGraphPane(paneData) {
@@ -118,12 +123,18 @@ export function assignLanes(commits) {
   const hashIndex = new Map();
   commits.forEach((c, i) => hashIndex.set(c.hash, i));
 
-  const lanes = new Map();
-  const activeLanes = [];
+  const lanes = new Map();       // hash -> lane index
+  const activeLanes = [];        // lane index -> expected hash (or null if free)
   let maxLane = 0;
-  const branchColors = new Map();
-  let nextColor = 1;
+  const branchColors = new Map(); // lane index -> color index
 
+  // Color pool: track when each color was freed (row index).
+  // A color is available if it was freed before the current row.
+  const colorFreeAt = new Array(GG.COLORS.length).fill(-1); // row when color became free
+  let masterColorIdx = 0; // green for main/master
+  colorFreeAt[masterColorIdx] = Infinity; // reserve until assigned
+
+  // Find master/main HEAD commit to assign color 0
   let masterHash = null;
   for (const c of commits) {
     if (c.refs && (/HEAD -> main\b/.test(c.refs) || /HEAD -> master\b/.test(c.refs))) {
@@ -132,12 +143,41 @@ export function assignLanes(commits) {
     }
   }
 
-  for (const commit of commits) {
+  function allocateColor(row) {
+    // Find earliest-freed color (temporal separation)
+    let bestIdx = -1, bestFreeRow = Infinity;
+    for (let c = 1; c < GG.COLORS.length; c++) { // skip 0 (reserved for master)
+      if (colorFreeAt[c] <= row && colorFreeAt[c] < bestFreeRow) {
+        bestFreeRow = colorFreeAt[c];
+        bestIdx = c;
+      }
+    }
+    if (bestIdx === -1) {
+      // All colors in use — pick the one freed longest ago (fallback)
+      bestIdx = 1;
+      for (let c = 2; c < GG.COLORS.length; c++) {
+        if (colorFreeAt[c] < colorFreeAt[bestIdx]) bestIdx = c;
+      }
+    }
+    colorFreeAt[bestIdx] = Infinity; // mark in use
+    return bestIdx;
+  }
+
+  function freeColor(colorIdx, row) {
+    if (colorIdx === masterColorIdx) return; // never free master color
+    colorFreeAt[colorIdx] = row;
+  }
+
+  for (let row = 0; row < commits.length; row++) {
+    const commit = commits[row];
+
+    // Find lane: check if any active lane expects this commit
     let lane = -1;
     for (let i = 0; i < activeLanes.length; i++) {
       if (activeLanes[i] === commit.hash) { lane = i; break; }
     }
     if (lane === -1) {
+      // New branch — find first free lane
       for (let i = 0; i < activeLanes.length; i++) {
         if (activeLanes[i] === null) { lane = i; break; }
       }
@@ -147,19 +187,34 @@ export function assignLanes(commits) {
     lanes.set(commit.hash, lane);
     if (lane > maxLane) maxLane = lane;
 
+    // Assign color if not already set
     if (!branchColors.has(lane)) {
-      if (commit.hash === masterHash) { branchColors.set(lane, 0); }
-      else { branchColors.set(lane, nextColor); nextColor = (nextColor + 1) % GG.COLORS.length; if (nextColor === 0) nextColor = 1; }
+      if (commit.hash === masterHash) {
+        branchColors.set(lane, masterColorIdx);
+        colorFreeAt[masterColorIdx] = Infinity;
+      } else {
+        branchColors.set(lane, allocateColor(row));
+      }
     }
 
+    // Free this lane's slot
+    const oldColor = branchColors.get(lane);
     activeLanes[lane] = null;
 
     if (commit.parents.length > 0) {
       const firstParent = commit.parents[0];
       if (hashIndex.has(firstParent) && !lanes.has(firstParent)) {
         const existingLane = activeLanes.indexOf(firstParent);
-        if (existingLane === -1) activeLanes[lane] = firstParent;
+        if (existingLane === -1) {
+          // Continue in same lane — keep same color
+          activeLanes[lane] = firstParent;
+        }
+      } else if (!hashIndex.has(firstParent)) {
+        // Parent not in our commit list — lane dies here, free color
+        freeColor(oldColor, row);
       }
+
+      // Handle merge parents (2nd, 3rd, etc.)
       for (let p = 1; p < commit.parents.length; p++) {
         const parentHash = commit.parents[p];
         if (!hashIndex.has(parentHash) || lanes.has(parentHash)) continue;
@@ -170,8 +225,20 @@ export function assignLanes(commits) {
         if (mergeLane === -1) { mergeLane = activeLanes.length; activeLanes.push(null); }
         activeLanes[mergeLane] = parentHash;
         if (mergeLane > maxLane) maxLane = mergeLane;
-        if (!branchColors.has(mergeLane)) { branchColors.set(mergeLane, nextColor); nextColor = (nextColor + 1) % GG.COLORS.length; if (nextColor === 0) nextColor = 1; }
+        if (!branchColors.has(mergeLane)) {
+          branchColors.set(mergeLane, allocateColor(row));
+        }
       }
+    } else {
+      // Root commit — lane dies, free color
+      freeColor(oldColor, row);
+    }
+
+    // Free colors for lanes that became empty (no longer expecting anything)
+    if (activeLanes[lane] === null && oldColor !== undefined) {
+      // Only free if we didn't re-assign this lane above
+      const stillActive = activeLanes[lane] !== null;
+      if (!stillActive) freeColor(oldColor, row);
     }
   }
 
@@ -202,10 +269,16 @@ export function renderSvgGitGraph(outputEl, commits, currentBranch) {
   const svgWidth = GG.LEFT_PAD + (maxLane + 1) * GG.LANE_W + 8;
   const totalHeight = commits.length * GG.ROW_H;
 
-  const paths = [];
-  const nodes = [];
+  const pathSegments = []; // { d, color, isMergeIn }
+  const nodes = [];        // { cx, cy, color, isMerge, isHead }
   const hashIndex = new Map();
   commits.forEach((c, i) => hashIndex.set(c.hash, i));
+
+  // Detect HEAD commit
+  let headHash = null;
+  for (const c of commits) {
+    if (c.refs && /HEAD/.test(c.refs)) { headHash = c.hash; break; }
+  }
 
   for (let i = 0; i < commits.length; i++) {
     const commit = commits[i];
@@ -214,10 +287,13 @@ export function renderSvgGitGraph(outputEl, commits, currentBranch) {
     const color = GG.COLORS[colorIdx];
     const cx = GG.LEFT_PAD + lane * GG.LANE_W;
     const cy = i * GG.ROW_H + GG.ROW_H / 2;
+    const isMerge = commit.parents.length > 1;
+    const isHead = commit.hash === headHash;
 
-    nodes.push({ cx, cy, color, hash: commit.hash });
+    nodes.push({ cx, cy, color, isMerge, isHead, hash: commit.hash });
 
-    for (const parentHash of commit.parents) {
+    for (let pIdx = 0; pIdx < commit.parents.length; pIdx++) {
+      const parentHash = commit.parents[pIdx];
       const pi = hashIndex.get(parentHash);
       if (pi === undefined) continue;
       const parentLane = lanes.get(parentHash);
@@ -227,19 +303,53 @@ export function renderSvgGitGraph(outputEl, commits, currentBranch) {
       const py = pi * GG.ROW_H + GG.ROW_H / 2;
 
       let d;
+      const isMergeIn = pIdx > 0; // secondary parent = merge-in line
+      const isBranchOff = pIdx === 0 && lane !== parentLane; // first parent but different lane
+
       if (lane === parentLane) {
+        // Same lane: straight vertical
         d = `M${cx} ${cy} L${px} ${py}`;
+      } else if (isBranchOff) {
+        // Branch-off: stay in parent lane first, then curve to child lane
+        // "locked to end" — vertical first from child, curve near parent
+        const curveD = GG.ROW_H * 0.8;
+        d = `M${cx} ${cy} C${cx} ${cy + curveD}, ${px} ${py - curveD}, ${px} ${py}`;
       } else {
-        const midY = cy + GG.ROW_H * 0.8;
-        d = `M${cx} ${cy} C${cx} ${midY}, ${px} ${py - GG.ROW_H * 0.8}, ${px} ${py}`;
+        // Merge-in: start from child lane, curve toward parent lane
+        // "locked to start" — curve near child, vertical into parent
+        const curveD = GG.ROW_H * 0.8;
+        d = `M${cx} ${cy} C${px} ${cy + curveD}, ${px} ${py - curveD}, ${px} ${py}`;
       }
-      const lineColor = lane !== parentLane ? GG.COLORS[parentColorIdx] : color;
-      paths.push({ d, color: lineColor });
+
+      // Merge-in lines use the incoming branch color; branch-off uses parent color
+      const lineColor = isMergeIn ? color : GG.COLORS[parentColorIdx];
+      pathSegments.push({ d, color: lineColor });
     }
   }
 
-  const svgPaths = paths.map(p => `<path d="${p.d}" stroke="${p.color}" stroke-width="2" fill="none" stroke-opacity="0.7"/>`).join('');
-  const svgNodes = nodes.map(n => `<circle cx="${n.cx}" cy="${n.cy}" r="${GG.NODE_R}" fill="${n.color}" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>`).join('');
+  // Render SVG: shadow paths first (wider, dark), then colored paths, then nodes on top
+  const bgColor = '#0a0f1a'; // approximate dark canvas background for shadow
+  const svgShadows = pathSegments.map(p =>
+    `<path d="${p.d}" stroke="${bgColor}" stroke-width="${GG.SHADOW_W}" fill="none" stroke-linecap="round"/>`
+  ).join('');
+  const svgPaths = pathSegments.map(p =>
+    `<path d="${p.d}" stroke="${p.color}" stroke-width="${GG.LINE_W}" fill="none" stroke-opacity="0.85" stroke-linecap="round"/>`
+  ).join('');
+
+  const svgNodes = nodes.map(n => {
+    if (n.isHead) {
+      // HEAD: open circle with thicker stroke (like mhutchie's "current" style)
+      return `<circle cx="${n.cx}" cy="${n.cy}" r="${GG.NODE_R + 1}" fill="none" stroke="${n.color}" stroke-width="2.5"/>` +
+             `<circle cx="${n.cx}" cy="${n.cy}" r="2" fill="${n.color}"/>`;
+    }
+    if (n.isMerge) {
+      // Merge: double filled circle (outer + inner, like VS Code's built-in)
+      return `<circle cx="${n.cx}" cy="${n.cy}" r="${GG.MERGE_R_OUTER}" fill="${n.color}" stroke="rgba(0,0,0,0.3)" stroke-width="0.5"/>` +
+             `<circle cx="${n.cx}" cy="${n.cy}" r="${GG.MERGE_R_INNER}" fill="#0d1117"/>`;
+    }
+    // Regular commit: solid filled circle
+    return `<circle cx="${n.cx}" cy="${n.cy}" r="${GG.NODE_R}" fill="${n.color}" stroke="rgba(0,0,0,0.3)" stroke-width="0.5"/>`;
+  }).join('');
 
   const rowsHtml = commits.map((commit, i) => {
     const lane = lanes.get(commit.hash);
@@ -279,6 +389,7 @@ export function renderSvgGitGraph(outputEl, commits, currentBranch) {
     <div class="gg-scroll-container">
       <svg class="gg-svg" width="${svgWidth}" height="${totalHeight}"
            viewBox="0 0 ${svgWidth} ${totalHeight}" xmlns="http://www.w3.org/2000/svg">
+        ${svgShadows}
         ${svgPaths}
         ${svgNodes}
       </svg>
