@@ -12,6 +12,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 (function() {
   'use strict';
 
+  // ============================================================================
+  // SECTION 1: STATE & CONSTANTS                                    [Lines ~15-77]
+  // All module-scope state: pane maps, mode flags, UI settings, etc.
+  // ============================================================================
+
   // Map of note pane ID -> { monacoEditor, resizeObserver }
   const noteEditors = new Map();
 
@@ -74,6 +79,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   let moveModePaneId = null;   // pane currently highlighted in move mode
   let lastTabUpTime = 0;       // timestamp for double-tap Tab detection
   let moveModeOriginalZoom = 1;  // zoom before entering move mode (for Esc restore)
+
+  // ============================================================================
+  // SECTION 2: SHORTCUT & NAVIGATION HELPERS                       [Lines ~79-199]
+  // Tab+1-9 quick-jump, shortcut badges, shortcut assign popup
+  // ============================================================================
 
   // Shortcut number helpers (Tab+1..9 quick-jump)
   function getNextShortcutNumber() {
@@ -200,6 +210,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
 
   // isExternalInputFocused — imported from modules/utils.js
+
+  // ============================================================================
+  // SECTION 3: TERMINAL OUTPUT & DEFERRED BUFFERING               [Lines ~204-334]
+  // Terminal I/O, selection-safe deferred writes, diagnostic dump (Ctrl+Shift+D)
+  // ============================================================================
 
   // File handles for native file picker (for saving back)
   const fileHandles = new Map(); // paneId -> FileSystemFileHandle
@@ -333,6 +348,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     }
   });
 
+  // ============================================================================
+  // SECTION 4: CLOUD PERSISTENCE & SYNC                           [Lines ~336-430]
+  // WebSocket/agent state vars, cloudFetch, layout/view/note sync (debounced)
+  // ============================================================================
+
   let ws = null;
   let wsReconnectTimer = null;
   let wsReconnectDelay = 2000;
@@ -441,6 +461,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   let dragOffsetX = 0;
   let dragOffsetY = 0;
 
+  // ============================================================================
+  // SECTION 5: MULTI-SELECT & BROADCAST                           [Lines ~445-497]
+  // Pane selection for broadcast mode, indicator UI
+  // ============================================================================
+
   // Broadcast mode state (unified multi-select + broadcast)
   const selectedPaneIds = new Set();
 
@@ -494,6 +519,12 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   // Pinch zoom state
   let initialPinchDistance = 0;
   let initialZoom = 1;
+
+  // ============================================================================
+  // SECTION 6: HUD SYSTEM (Fleet, Agents, Chat)                  [Lines ~499-1488]
+  // HUD container, fleet device cards, agents usage, chat/feedback panel,
+  // device highlighting, terminal theme application
+  // ============================================================================
 
   // HUD overlay state
   let hudData = { devices: [] };
@@ -1486,7 +1517,12 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   }
 
 
-  // Initialize
+  // ============================================================================
+  // SECTION 7: GUEST MODE & CLAUDE STATE TRACKING                [Lines ~1491-1942]
+  // Guest session nudges/expiry, init() bootstrap, Claude state badges,
+  // updateClaudeStates() notification integration
+  // ============================================================================
+
   // === Guest Mode: Nudge & Forced Registration ===
   const GUEST_HARD_LIMIT_MS = 30 * 60 * 1000;       // 30 minutes
   const GUEST_TOAST_ID = '__guest_expiry__';
@@ -1940,6 +1976,12 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     }
   }
 
+  // ============================================================================
+  // SECTION 8: WEBSOCKET COMMUNICATION                           [Lines ~1944-2388]
+  // connectWebSocket(), handleWsMessage() giant switch, heartbeat, reconnect,
+  // agent online/offline handling, upgrade prompts
+  // ============================================================================
+
   // Connect to WebSocket
   function connectWebSocket() {
     if (ws && ws.readyState === WebSocket.OPEN) return;
@@ -2387,6 +2429,12 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     });
   }
 
+  // ============================================================================
+  // SECTION 9: PREFERENCES & SETTINGS MODAL                      [Lines ~2390-2832]
+  // User prefs (theme, font, canvas bg, night mode), settings modal UI,
+  // theme/font pickers, hotkeys reference
+  // ============================================================================
+
   // === Settings Modal ===
   let prefsSaveTimer = null;
   let currentCanvasBg = 'default';
@@ -2831,6 +2879,12 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     });
   }
 
+  // ============================================================================
+  // SECTION 10: WS HELPERS & AGENT MANAGEMENT                    [Lines ~2835-3210]
+  // sendWs(), relay notifications, agent update toasts, add-machine dialog,
+  // agent overlay, device helpers
+  // ============================================================================
+
   // Send WebSocket message (agentId defaults to activeAgentId for backward compat)
   function sendWs(type, payload, agentId) {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -3208,6 +3262,12 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     return (pane && pane.agentId) || activeAgentId;
   }
 
+  // ============================================================================
+  // SECTION 11: REST-OVER-WS API & CONNECTION STATUS              [Lines ~3212-3397]
+  // agentRequest() RPC, pending request correlation, connection indicators,
+  // offline placeholders, disconnect overlays
+  // ============================================================================
+
   // Pending request/response correlation
   const pendingRequests = new Map();
   const pendingScanCallbacks = new Map(); // id -> onPartial callback for streaming scan results
@@ -3394,6 +3454,14 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       setDisconnectOverlay(pane, 'offline');
     }
   }
+
+  // ============================================================================
+  // SECTION 12: PANE CREATION & TYPE REGISTRY                    [Lines ~3398-4700]
+  // PANE_TYPES config, loadAgentPanes(), createPane(), deletePane(),
+  // createFilePane(), createNotePane(), createGitGraphPane(), createIframePane(),
+  // createFolderPane(), createBeadsPane(), file/folder browser overlays,
+  // custom select widget, device picker
+  // ============================================================================
 
   // Load all 6 pane types from a single agent, tagging each with agentId
   // Pane type configuration for data-driven loading
@@ -4700,6 +4768,13 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     }
   }
 
+  // ============================================================================
+  // SECTION 13: TERMINAL LIFECYCLE & PANE RENDERING              [Lines ~4704-5086]
+  // attachTerminal(), reattachTerminal(), renderPane() dispatcher,
+  // renderFilePane(), Monaco file editor setup, device colors,
+  // beads/claude session badges, deviceLabelHtml()
+  // ============================================================================
+
   // Attach terminal to WebSocket
   function attachTerminal(pane) {
     const termInfo = terminals.get(pane.id);
@@ -5084,6 +5159,13 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   // escapeHtml — imported from modules/utils.js
 
   // Expand a pane to full screen
+  // ============================================================================
+  // SECTION 14: PANE-SPECIFIC RENDERERS                          [Lines ~5087-6427]
+  // expandPane()/collapsePane(), renderNotePane() (Monaco markdown),
+  // renderIframePane(), renderBeadsPane(), renderFolderPane() (tree view),
+  // setupBeadsListeners(), setupIframeListeners(), folder tree operations
+  // ============================================================================
+
   function expandPane(paneId) {
     if (expandedPaneId) return; // Already have an expanded pane
     clearMultiSelect();
@@ -6425,6 +6507,14 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   }
 
   // Setup note editor event listeners
+  // ============================================================================
+  // SECTION 15: EDITOR & INPUT SETUP                             [Lines ~6428-7203]
+  // setupNoteEditorListeners(), setupImageButtonHandlers(),
+  // setupTextOnlyToggle(), setupFileEditorListeners(),
+  // initTerminal() (~320 lines: xterm config, resize, input forwarding,
+  //   paste/clipboard, link detection, mouse reporting for tmux)
+  // ============================================================================
+
   function setupNoteEditorListeners(paneEl, paneData) {
     const editor = paneEl.querySelector('.note-editor');
     const fontSizeEl = paneEl.querySelector('.note-font-size');
@@ -7201,6 +7291,14 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
   // Setup pane event listeners
   // Shared pane zoom function — handles ALL pane types
+  // ============================================================================
+  // SECTION 16: PANE INTERACTION & LAYOUT                        [Lines ~7204-8183]
+  // applyPaneZoom(), setupPaneListeners() (~500 lines: click, drag, resize,
+  //   context menu, header actions, broadcast selection, renaming),
+  // findSnapTargets(), findResizeSnapTargets(), snap guides,
+  // startDrag(), startResizeHold()/activateResize()
+  // ============================================================================
+
   function applyPaneZoom(paneData, paneEl) {
     const scale = (paneData.zoomLevel || 100) / 100;
     if (paneData.type === 'terminal') {
@@ -8182,6 +8280,12 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     document.addEventListener('touchend', endHandler);
   }
 
+  // ============================================================================
+  // SECTION 17: PANE FOCUS & CANVAS NAVIGATION                   [Lines ~8185-8298]
+  // focusPane(), panToPane(), focusTerminalInput(),
+  // updateCanvasTransform(), getQuickViewInfo()
+  // ============================================================================
+
   // Bring pane to front
   function focusPane(paneData) {
 
@@ -8295,6 +8399,13 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
     return { type, device, path, claudeState };
   }
+
+  // ============================================================================
+  // SECTION 18: QUICK VIEW & MENTION MODE                        [Lines ~8299-8700]
+  // addQuickViewOverlay() (git, beads, claude metadata overlays),
+  // removeQuickViewOverlay(), toggleQuickView(),
+  // enterMentionMode(), exitMentionMode(), mention stage overlays
+  // ============================================================================
 
   function addQuickViewOverlay(paneEl, paneData) {
     if (paneEl.querySelector('.quick-view-overlay')) return;
@@ -8699,6 +8810,12 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
   // Enter placement mode with all picker data already resolved
   // createFn(placementPos) will be called on click
+  // ============================================================================
+  // SECTION 19: PLACEMENT MODE                                   [Lines ~8702-8953]
+  // enterPlacementMode(), cancelPlacementMode(), handlePlacementMouseMove(),
+  // handlePlacementKeyDown() (D=delete, R=rotate), placement click/right-click
+  // ============================================================================
+
   function enterPlacementMode(type, createFn) {
     if (moveModeActive) exitMoveMode();
     cancelPlacementMode();
@@ -8950,6 +9067,12 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     });
   }
 
+
+  // ============================================================================
+  // SECTION 20: UI MENUS & TOOLBAR                               [Lines ~8954-9405]
+  // setupAddPaneMenu(), setupTutorialMenu(), setupToolbarButtons(),
+  // setupCustomTooltips(), setupCanvasInteraction(), calcMoveModeZoom()
+  // ============================================================================
 
   function setupAddPaneMenu() {
     const addBtn = document.getElementById('add-pane-btn');
@@ -9403,6 +9526,12 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     );
   }
 
+  // ============================================================================
+  // SECTION 21: MOVE MODE (WASD NAVIGATION)                      [Lines ~9406-9585]
+  // enterMoveMode(), exitMoveMode(), applyMoveModeVisuals(),
+  // moveModeNavigate(), findPaneInDirection() (spatial lookup)
+  // ============================================================================
+
   function enterMoveMode() {
     if (moveModeActive) return;
     moveModeActive = true;
@@ -9582,6 +9711,14 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
     applyMoveModeVisuals();
   }
+
+  // ============================================================================
+  // SECTION 22: KEYBOARD SHORTCUTS                               [Lines ~9586-9975]
+  // setupKeyboardShortcuts() (~390 lines):
+  //   Tab chords: Tab+Q (cycle), Tab+A (add), Tab+D (device), Tab+1-9 (jump)
+  //   Double-tap Tab -> move mode, Tab+Scroll -> canvas pan
+  //   Arrow key/mouse pan, Ctrl+Scroll zoom, Escape mode exit
+  // ============================================================================
 
   function setupKeyboardShortcuts() {
     // Tab+key chords: hold Tab, press key for shortcuts (Q=cycle, A=add, D=fleet, etc.)
@@ -9973,6 +10110,14 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     });
   }
 
+  // ============================================================================
+  // SECTION 23: CANVAS EVENT LISTENERS                           [Lines ~9976-10289]
+  // setupEventListeners(): canvas mouse/touch handlers,
+  //   handleCanvasPanStart(), selection rect (Shift+drag),
+  //   middle/right mouse pan, touch pinch zoom,
+  //   handleWheel(), setZoom()
+  // ============================================================================
+
   function setupEventListeners() {
     setupAddPaneMenu();
     setupToolbarButtons();
@@ -10292,6 +10437,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   } else {
     init();
   }
+
+  // ============================================================================
+  // SECTION 24: DEBUG EXPORTS                                    [Lines ~10297-10344]
+  // window.TC2_DEBUG: exposed internals for dev mode and console debugging
+  // ============================================================================
 
   // Debug helper - expose internals for debugging and dev mode
   window.TC2_DEBUG = {
