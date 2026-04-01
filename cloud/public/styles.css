@@ -986,6 +986,161 @@ body.minimap-hidden #controls {
   }
 }
 
+/* ---- Mobile Pane Nav Drawer ---- */
+#mobile-nav-btn {
+  display: none;
+}
+@media (max-width: 768px) {
+  #mobile-nav-btn {
+    display: flex;
+    position: fixed;
+    bottom: 24px;
+    left: 16px;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 1px solid rgba(218, 119, 86, 0.4);
+    background: rgba(26, 26, 46, 0.92);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 20px;
+    align-items: center;
+    justify-content: center;
+    z-index: 10001;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    -webkit-user-select: none;
+    user-select: none;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+  }
+  #mobile-nav-btn:active {
+    transform: scale(0.9);
+  }
+  body.pane-expanded #mobile-nav-btn {
+    display: none;
+  }
+}
+
+.mobile-nav-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 10100;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.mobile-nav-backdrop.visible {
+  opacity: 1;
+}
+
+.mobile-nav-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  max-height: 55vh;
+  background: #1a1a2e;
+  border-top: 1px solid rgba(218, 119, 86, 0.3);
+  border-radius: 16px 16px 0 0;
+  z-index: 10101;
+  transform: translateY(100%);
+  transition: transform 0.25s ease;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mobile-nav-sheet.open {
+  transform: translateY(0);
+}
+
+.mobile-nav-handle {
+  width: 36px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 2px;
+  margin: 10px auto 6px;
+  flex-shrink: 0;
+}
+
+.mobile-nav-title {
+  font-size: 12px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 0 16px 8px;
+  flex-shrink: 0;
+}
+
+.mobile-nav-list {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  flex: 1;
+  padding: 0 8px 16px;
+}
+
+.mobile-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 14px;
+}
+.mobile-nav-item:active {
+  background: rgba(218, 119, 86, 0.15);
+}
+
+.mobile-nav-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.mobile-nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-nav-device {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  flex-shrink: 0;
+}
+
+.mobile-nav-shortcut {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: rgba(218, 119, 86, 0.25);
+  color: rgba(218, 119, 86, 0.9);
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.mobile-nav-empty {
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 13px;
+  text-align: center;
+  padding: 32px 16px;
+}
+
 /* Disable pane mouse events during middle-mouse canvas pan */
 .middle-panning .pane {
   pointer-events: none;

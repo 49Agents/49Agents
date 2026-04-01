@@ -5180,6 +5180,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     if (!paneEl) return;
 
     expandedPaneId = paneId;
+    document.body.classList.add('pane-expanded');
 
     // Store original position/size for restoration
     paneEl.dataset.originalStyle = paneEl.getAttribute('style') || '';
@@ -5288,6 +5289,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
     // Clear expanded state
     expandedPaneId = null;
+    document.body.classList.remove('pane-expanded');
 
 
     // Refit terminal if this is a terminal pane
@@ -9191,6 +9193,133 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     });
   }
 
+  // Mobile pane navigation drawer (bottom sheet)
+  function setupMobileNavDrawer() {
+    // Only create on mobile-width screens
+    if (window.innerWidth > 768) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'mobile-nav-btn';
+    btn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
+    document.body.appendChild(btn);
+
+    const PANE_ICONS = {
+      terminal: '>_',
+      file: '\u{1F4C4}',
+      note: '\u{1F4DD}',
+      'git-graph': '\u{1F333}',
+      iframe: '\u{1F310}',
+      beads: '\u{1F4CE}',
+      folder: '\u{1F4C1}',
+    };
+
+    function getPaneLabel(p) {
+      if (p.paneName) return p.paneName;
+      if (p.type === 'file') return p.fileName || p.filePath || 'File';
+      if (p.type === 'note') return 'Note';
+      if (p.type === 'git-graph') return p.repoName || 'Git Graph';
+      if (p.type === 'iframe') return p.url ? new URL(p.url).hostname : 'Browser';
+      if (p.type === 'beads') return 'Beads';
+      if (p.type === 'folder') return (p.folderPath || '').split('/').pop() || 'Folder';
+      return 'Terminal';
+    }
+
+    function openDrawer() {
+      // Backdrop
+      const backdrop = document.createElement('div');
+      backdrop.className = 'mobile-nav-backdrop';
+      document.body.appendChild(backdrop);
+
+      // Sheet
+      const sheet = document.createElement('div');
+      sheet.className = 'mobile-nav-sheet';
+      sheet.innerHTML = '<div class="mobile-nav-handle"></div><div class="mobile-nav-title">Panes</div><div class="mobile-nav-list"></div>';
+      document.body.appendChild(sheet);
+
+      const list = sheet.querySelector('.mobile-nav-list');
+
+      // Sort: shortcut number first (1-9), then by position (left-to-right, top-to-bottom)
+      const sorted = [...state.panes].sort((a, b) => {
+        const aNum = a.shortcutNumber || 99;
+        const bNum = b.shortcutNumber || 99;
+        if (aNum !== bNum) return aNum - bNum;
+        if (a.y !== b.y) return a.y - b.y;
+        return a.x - b.x;
+      });
+
+      if (sorted.length === 0) {
+        list.innerHTML = '<div class="mobile-nav-empty">No panes yet</div>';
+      } else {
+        sorted.forEach(p => {
+          const item = document.createElement('div');
+          item.className = 'mobile-nav-item';
+
+          const icon = document.createElement('div');
+          icon.className = 'mobile-nav-icon';
+          icon.textContent = PANE_ICONS[p.type] || '>_';
+
+          const label = document.createElement('div');
+          label.className = 'mobile-nav-label';
+          label.textContent = getPaneLabel(p);
+
+          item.appendChild(icon);
+          item.appendChild(label);
+
+          if (p.device) {
+            const device = document.createElement('div');
+            device.className = 'mobile-nav-device';
+            device.textContent = p.device;
+            item.appendChild(device);
+          }
+
+          if (p.shortcutNumber) {
+            const sc = document.createElement('div');
+            sc.className = 'mobile-nav-shortcut';
+            sc.textContent = p.shortcutNumber;
+            item.appendChild(sc);
+          }
+
+          item.addEventListener('click', () => {
+            closeDrawer();
+            jumpToPane(p);
+            setTimeout(() => expandPane(p.id), 150);
+          });
+
+          list.appendChild(item);
+        });
+      }
+
+      // Animate in
+      requestAnimationFrame(() => {
+        backdrop.classList.add('visible');
+        sheet.classList.add('open');
+      });
+
+      // Swipe-down to close
+      let touchStartY = 0;
+      sheet.addEventListener('touchstart', (e) => {
+        touchStartY = e.touches[0].clientY;
+      }, { passive: true });
+      sheet.addEventListener('touchmove', (e) => {
+        const dy = e.touches[0].clientY - touchStartY;
+        if (dy > 60) closeDrawer();
+      }, { passive: true });
+
+      function closeDrawer() {
+        sheet.classList.remove('open');
+        backdrop.classList.remove('visible');
+        setTimeout(() => {
+          sheet.remove();
+          backdrop.remove();
+        }, 250);
+      }
+
+      backdrop.addEventListener('click', closeDrawer);
+    }
+
+    btn.addEventListener('click', openDrawer);
+  }
+
   function setupToolbarButtons() {
     document.getElementById('settings-btn').addEventListener('click', () => showSettingsModal());
 
@@ -10127,6 +10256,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     setupCanvasInteraction();
     setupPasteHandlers();
     setupKeyboardShortcuts();
+    setupMobileNavDrawer();
 
     // Prevent Safari's native pinch-to-zoom (bypasses touch-action: none)
     document.addEventListener('gesturestart', e => e.preventDefault());
