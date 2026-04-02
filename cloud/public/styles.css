@@ -970,9 +970,16 @@ body.minimap-hidden #controls {
     font-size: 32px;
   }
 
+  /* Ensure zoom controls are in bottom-right on mobile */
+  #controls {
+    bottom: 24px !important;
+    right: 16px;
+    z-index: 9990;
+  }
+
   #controls button {
-    width: 48px;
-    height: 48px;
+    width: 40px;
+    height: 40px;
   }
 
   .pane {
@@ -2213,10 +2220,50 @@ body.minimap-hidden #controls {
 /* Mobile optimizations for expanded pane */
 @media (max-width: 768px) {
   .pane.expanded {
-    top: 10px !important;
-    left: 10px !important;
-    right: 10px !important;
-    bottom: 10px !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    border-radius: 0;
+  }
+
+  /* Hide canvas zoom controls when a pane is expanded on mobile */
+  body.pane-expanded #controls {
+    display: none !important;
+  }
+
+  /* Ensure pane header buttons work on mobile in fullscreen — increase touch targets */
+  .pane.expanded .pane-zoom-btn {
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+    min-width: 32px;
+    min-height: 32px;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .pane.expanded .pane-expand {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .pane.expanded .pane-close {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .pane.expanded .pane-header-right button,
+  .pane.expanded .pane-header-right .pane-zoom-btn {
+    pointer-events: auto !important;
   }
 }
 
@@ -5582,6 +5629,147 @@ body.cursor-suppressed .pane { pointer-events: none !important; }
     bottom: 120px;
     left: 12px;
     min-width: 180px;
+  }
+}
+
+/* ─── Mobile Keyboard Extension Bar ─── */
+#mobile-keyboard-bar {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100000;
+  background: rgba(20, 20, 35, 0.97);
+  border-top: 1px solid rgba(218, 119, 86, 0.25);
+  padding: 6px 8px;
+  gap: 6px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+#mobile-keyboard-bar::-webkit-scrollbar {
+  display: none;
+}
+
+#mobile-keyboard-bar.visible {
+  display: flex;
+}
+
+.mobile-key-btn {
+  flex-shrink: 0;
+  min-width: 42px;
+  height: 36px;
+  border: 1px solid rgba(218, 119, 86, 0.3);
+  background: rgba(218, 119, 86, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background 0.1s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mobile-key-btn:active {
+  background: rgba(218, 119, 86, 0.35);
+}
+
+.mobile-key-btn.modifier-active {
+  background: rgba(218, 119, 86, 0.4);
+  border-color: rgba(218, 119, 86, 0.7);
+  color: #fff;
+}
+
+.mobile-key-sep {
+  width: 1px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 4px 2px;
+}
+
+/* ─── Mobile terminal scroll fix ─── */
+@media (max-width: 768px) {
+  .pane.expanded .xterm-viewport {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    pointer-events: auto !important;
+    touch-action: pan-y !important;
+  }
+
+  .pane.expanded .terminal-container {
+    overflow: hidden;
+    touch-action: none;
+  }
+
+  /* When mobile keyboard is visible, adjust expanded pane */
+  body.mobile-keyboard-visible .pane.expanded {
+    bottom: 50px !important;
+  }
+}
+
+/* ─── HUD mobile minimization ─── */
+@media (max-width: 768px) {
+  #hud-overlay {
+    transform: scale(0.85);
+    transform-origin: top left;
+  }
+
+  #hud-overlay.collapsed {
+    transform: scale(0.8);
+  }
+
+  .hud-device {
+    padding: 4px 5px;
+  }
+
+  .hud-counts {
+    gap: 4px;
+  }
+
+  .hud-count {
+    font-size: 9px;
+    padding: 1px 4px;
+  }
+
+  /* Make HUD even smaller on small phones */
+  @media (max-width: 480px) {
+    #hud-container {
+      top: 6px;
+      left: 6px;
+    }
+
+    #hud-overlay {
+      transform: scale(0.75);
+      padding: 6px 8px;
+      min-width: 120px;
+      max-width: 200px;
+    }
+
+    .hud-device-name {
+      font-size: 9px;
+      max-width: 80px;
+    }
+
+    .hud-metric {
+      font-size: 8px;
+    }
+  }
+
+  /* Hide HUD completely when pane is expanded on mobile */
+  body.pane-expanded #hud-container {
+    display: none !important;
   }
 }
 

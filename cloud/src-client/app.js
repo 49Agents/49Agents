@@ -7163,6 +7163,42 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       xterm.scrollLines(lines);
     }, { passive: false, capture: true });
 
+    // Mobile touch scroll for terminal history in expanded/fullscreen mode
+    let _touchScrollY = 0;
+    let _touchScrollActive = false;
+    container.addEventListener('touchstart', (e) => {
+      if (!expandedPaneId || expandedPaneId !== paneData.id) return;
+      if (e.touches.length !== 1) return;
+      _touchScrollY = e.touches[0].clientY;
+      _touchScrollActive = true;
+    }, { passive: true });
+
+    container.addEventListener('touchmove', (e) => {
+      if (!_touchScrollActive) return;
+      if (!expandedPaneId || expandedPaneId !== paneData.id) return;
+      const dy = _touchScrollY - e.touches[0].clientY;
+      _touchScrollY = e.touches[0].clientY;
+      const lines = Math.round(dy / 20) || (dy > 0 ? 1 : dy < 0 ? -1 : 0);
+      if (lines !== 0) {
+        // Check if TUI app is active — send arrow keys instead
+        const termRef = terminals.get(paneData.id);
+        if (termRef?._alternateOn) {
+          const arrow = lines > 0 ? '\x1b[B' : '\x1b[A';
+          const count = Math.abs(lines);
+          const seq = arrow.repeat(count);
+          const encoded = btoa(unescape(encodeURIComponent(seq)));
+          sendWs('terminal:input', { terminalId: paneData.id, data: encoded }, paneData.agentId);
+        } else {
+          xterm.scrollLines(lines);
+        }
+      }
+      e.preventDefault();
+    }, { passive: false });
+
+    container.addEventListener('touchend', () => {
+      _touchScrollActive = false;
+    }, { passive: true });
+
     // Store terminal info first
     terminals.set(paneData.id, { xterm, fitAddon });
 
@@ -7432,11 +7468,25 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         applyZoom();
         cloudSaveLayout(paneData);
       });
+      zoomInBtn.addEventListener('touchend', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        paneData.zoomLevel = Math.min(500, paneData.zoomLevel + 10);
+        applyZoom();
+        cloudSaveLayout(paneData);
+      });
     }
 
     if (zoomOutBtn) {
       zoomOutBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        paneData.zoomLevel = Math.max(20, paneData.zoomLevel - 10);
+        applyZoom();
+        cloudSaveLayout(paneData);
+      });
+      zoomOutBtn.addEventListener('touchend', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
         paneData.zoomLevel = Math.max(20, paneData.zoomLevel - 10);
         applyZoom();
         cloudSaveLayout(paneData);
@@ -7451,6 +7501,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     if (refreshHistoryBtn) {
       refreshHistoryBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        reattachTerminal(paneData);
+      });
+      refreshHistoryBtn.addEventListener('touchend', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
         reattachTerminal(paneData);
       });
     }
@@ -9385,6 +9440,158 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     btn.addEventListener('click', openDrawer);
   }
 
+  // ─── Mobile Keyboard Extension Bar ───
+  // Provides Esc, Ctrl+C, Tab, arrow keys, etc. above the on-screen keyboard
+  function setupMobileKeyboardBar() {
+    if (window.innerWidth > 768) return;
+
+    const bar = document.createElement('div');
+    bar.id = 'mobile-keyboard-bar';
+
+    // Track modifier states
+    let ctrlActive = false;
+
+    const keys = [
+      { label: 'Esc', data: '\x1b' },
+      { label: 'Tab', data: '\t' },
+      { sep: true },
+      { label: 'Ctrl', modifier: 'ctrl' },
+      { label: 'C', data: '\x03', useCtrl: true },  // Ctrl+C when ctrl active, else 'c'
+      { label: 'D', data: '\x04', useCtrl: true },  // Ctrl+D
+      { label: 'Z', data: '\x1a', useCtrl: true },  // Ctrl+Z
+      { label: 'L', data: '\x0c', useCtrl: true },  // Ctrl+L (clear)
+      { label: 'A', data: '\x01', useCtrl: true },  // Ctrl+A (start of line)
+      { label: 'E', data: '\x05', useCtrl: true },  // Ctrl+E (end of line)
+      { sep: true },
+      { label: '\u2191', data: '\x1b[A' },  // Up
+      { label: '\u2193', data: '\x1b[B' },  // Down
+      { label: '\u2190', data: '\x1b[D' },  // Left
+      { label: '\u2192', data: '\x1b[C' },  // Right
+    ];
+
+    keys.forEach(key => {
+      if (key.sep) {
+        const sep = document.createElement('div');
+        sep.className = 'mobile-key-sep';
+        bar.appendChild(sep);
+        return;
+      }
+
+      const btn = document.createElement('button');
+      btn.className = 'mobile-key-btn';
+      btn.textContent = key.label;
+      btn.setAttribute('tabindex', '-1'); // Don't steal focus from terminal
+
+      if (key.modifier === 'ctrl') {
+        btn.addEventListener('touchstart', (e) => {
+          e.preventDefault();
+          ctrlActive = !ctrlActive;
+          btn.classList.toggle('modifier-active', ctrlActive);
+        }, { passive: false });
+      } else {
+        btn.addEventListener('touchstart', (e) => {
+          e.preventDefault(); // Prevent keyboard dismiss
+          // Find the active expanded terminal
+          if (!expandedPaneId) return;
+          const termInfo = terminals.get(expandedPaneId);
+          if (!termInfo || !termInfo.xterm) return;
+
+          let data;
+          if (key.useCtrl && ctrlActive) {
+            // Send the ctrl version
+            data = key.data;
+            // Deactivate ctrl after use
+            ctrlActive = false;
+            const ctrlBtn = bar.querySelector('.modifier-active');
+            if (ctrlBtn) ctrlBtn.classList.remove('modifier-active');
+          } else if (key.useCtrl && !ctrlActive) {
+            // Send lowercase letter
+            data = key.label.toLowerCase();
+          } else {
+            data = key.data;
+          }
+
+          const encoded = btoa(unescape(encodeURIComponent(data)));
+          sendWs('terminal:input', { terminalId: expandedPaneId, data: encoded }, getPaneAgentId(expandedPaneId));
+        }, { passive: false });
+      }
+
+      bar.appendChild(btn);
+    });
+
+    document.body.appendChild(bar);
+
+    // Show/hide based on expanded terminal state and keyboard visibility
+    // Use visualViewport API to detect on-screen keyboard
+    function updateKeyboardBarVisibility() {
+      const isTermExpanded = expandedPaneId && state.panes.find(p => p.id === expandedPaneId && p.type === 'terminal');
+      if (isTermExpanded && window.innerWidth <= 768) {
+        bar.classList.add('visible');
+      } else {
+        bar.classList.remove('visible');
+      }
+    }
+
+    // Observe expand/collapse
+    const origExpand = expandPane;
+    const origCollapse = collapsePane;
+
+    // We need to hook into expand/collapse — use MutationObserver on body class
+    const observer = new MutationObserver(() => {
+      updateKeyboardBarVisibility();
+    });
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+
+    // Also handle visual viewport resize (keyboard show/hide)
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', () => {
+        const isTermExpanded = expandedPaneId && state.panes.find(p => p.id === expandedPaneId && p.type === 'terminal');
+        if (!isTermExpanded || window.innerWidth > 768) return;
+
+        const vvHeight = window.visualViewport.height;
+        const windowHeight = window.innerHeight;
+        const keyboardHeight = windowHeight - vvHeight;
+
+        if (keyboardHeight > 100) {
+          // Keyboard is visible
+          document.body.classList.add('mobile-keyboard-visible');
+          bar.style.bottom = `${keyboardHeight}px`;
+
+          // Resize expanded pane to fit above keyboard + bar
+          const paneEl = expandedPaneId ? document.getElementById(`pane-${expandedPaneId}`) : null;
+          if (paneEl && paneEl.classList.contains('expanded')) {
+            paneEl.style.bottom = `${keyboardHeight + 50}px`;
+            // Refit terminal
+            const termInfo = terminals.get(expandedPaneId);
+            if (termInfo?.safeFitAndSync) {
+              setTimeout(() => termInfo.safeFitAndSync(), 50);
+            }
+          }
+        } else {
+          // Keyboard is hidden
+          document.body.classList.remove('mobile-keyboard-visible');
+          bar.style.bottom = '0px';
+
+          const paneEl = expandedPaneId ? document.getElementById(`pane-${expandedPaneId}`) : null;
+          if (paneEl && paneEl.classList.contains('expanded')) {
+            paneEl.style.bottom = '0px';
+            const termInfo = terminals.get(expandedPaneId);
+            if (termInfo?.safeFitAndSync) {
+              setTimeout(() => termInfo.safeFitAndSync(), 50);
+            }
+          }
+        }
+      });
+
+      window.visualViewport.addEventListener('scroll', () => {
+        // Keep bar pinned to bottom of visual viewport
+        if (bar.classList.contains('visible')) {
+          bar.style.bottom = `${window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop}px`;
+        }
+      });
+    }
+  }
+
   function setupToolbarButtons() {
     document.getElementById('settings-btn').addEventListener('click', () => showSettingsModal());
 
@@ -10322,6 +10529,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     setupPasteHandlers();
     setupKeyboardShortcuts();
     setupMobileNavDrawer();
+    setupMobileKeyboardBar();
 
     // Prevent Safari's native pinch-to-zoom (bypasses touch-action: none)
     document.addEventListener('gesturestart', e => e.preventDefault());
