@@ -3,6 +3,7 @@ import { getLayoutsByUser, saveFullLayout, updatePaneLayout, deletePaneLayout, u
 import { getNotesByUser, getNoteById, upsertNote, deleteNote } from '../db/noteSync.js';
 import { getViewState, saveViewState } from '../db/viewState.js';
 import { checkImageLimit } from '../billing/enforcement.js';
+import { upsertRecentContext, getRecentContexts, getRecentContextsMultiType } from '../db/recentContexts.js';
 
 /**
  * Set up layout persistence routes.
@@ -108,6 +109,34 @@ export function setupLayoutRoutes(app) {
   app.put('/api/view-state', requireAuth, (req, res) => {
     const { zoom, panX, panY } = req.body;
     saveViewState(req.user.id, zoom, panX, panY);
+    res.json({ ok: true });
+  });
+
+  // =====================
+  // RECENT PANE CONTEXTS
+  // =====================
+
+  // GET /api/recent-contexts?paneType=git-graph&agentId=agent_xxx
+  // Directory-based pane types (git-graph, folder, beads) cross-pollinate automatically.
+  const DIRECTORY_PANE_TYPES = ['git-graph', 'folder', 'beads'];
+  app.get('/api/recent-contexts', requireAuth, (req, res) => {
+    const { paneType, agentId } = req.query;
+    if (!paneType || !agentId) {
+      return res.status(400).json({ error: 'paneType and agentId are required' });
+    }
+    const recents = DIRECTORY_PANE_TYPES.includes(paneType)
+      ? getRecentContextsMultiType(req.user.id, agentId, DIRECTORY_PANE_TYPES)
+      : getRecentContexts(req.user.id, agentId, paneType);
+    res.json({ recents });
+  });
+
+  // POST /api/recent-contexts — upsert a recent context
+  app.post('/api/recent-contexts', requireAuth, (req, res) => {
+    const { paneType, agentId, context, label } = req.body;
+    if (!paneType || !agentId || !context) {
+      return res.status(400).json({ error: 'paneType, agentId, and context are required' });
+    }
+    upsertRecentContext(req.user.id, agentId, paneType, context, label);
     res.json({ ok: true });
   });
 }

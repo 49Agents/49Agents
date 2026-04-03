@@ -160,6 +160,26 @@ export function initDatabase() {
     db.prepare("ALTER TABLE agents ADD COLUMN display_name TEXT").run();
   } catch (e) { /* already exists */ }
 
+  // Migration: recent_pane_contexts table
+  try {
+    db.prepare('SELECT id FROM recent_pane_contexts LIMIT 1').get();
+  } catch (e) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS recent_pane_contexts (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        agent_id   TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        pane_type  TEXT NOT NULL,
+        context    TEXT NOT NULL,
+        label      TEXT,
+        used_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(user_id, agent_id, pane_type, context)
+      );
+      CREATE INDEX IF NOT EXISTS idx_recent_ctx_lookup ON recent_pane_contexts(user_id, agent_id, pane_type, used_at DESC);
+    `);
+    console.log('[db] Migration: Created recent_pane_contexts table');
+  }
+
   console.log(`[db] SQLite database initialized at ${config.dbPath}`);
   return db;
 }

@@ -120,3 +120,15 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_user_sender_read ON messages(user_id, sender, read_at);
+
+CREATE TABLE IF NOT EXISTS recent_pane_contexts (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  agent_id   TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  pane_type  TEXT NOT NULL,
+  context    TEXT NOT NULL,
+  label      TEXT,
+  used_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(user_id, agent_id, pane_type, context)
+);
+CREATE INDEX IF NOT EXISTS idx_recent_ctx_lookup ON recent_pane_contexts(user_id, agent_id, pane_type, used_at DESC);

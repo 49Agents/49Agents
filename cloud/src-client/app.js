@@ -414,6 +414,118 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     }, 500));
   }
 
+  // Save a recent pane context to cloud (fire-and-forget)
+  function saveRecentContext(paneType, context, label, agentId) {
+    const resolvedAgentId = agentId || activeAgentId;
+    if (!resolvedAgentId || !context) return;
+    cloudFetch('POST', '/api/recent-contexts', { paneType, agentId: resolvedAgentId, context, label: label || null })
+      .catch(e => console.error('[Cloud] Recent context save failed:', e.message));
+  }
+
+  // Fetch recent pane contexts from cloud
+  async function fetchRecentContexts(paneType, agentId) {
+    const resolvedAgentId = agentId || activeAgentId;
+    if (!resolvedAgentId) return [];
+    try {
+      const data = await cloudFetch('GET', `/api/recent-contexts?paneType=${encodeURIComponent(paneType)}&agentId=${encodeURIComponent(resolvedAgentId)}`);
+      return data.recents || [];
+    } catch (e) {
+      console.error('[Cloud] Recent context fetch failed:', e.message);
+      return [];
+    }
+  }
+
+  // Show a recents popup for a pane type. If recents exist, shows them + Browse option.
+  // If no recents, calls browseFn() directly.
+  // onRecent(context, label) is called when user picks a recent item.
+  // browseFn() is called when user picks "Browse..." or no recents exist.
+  async function showRecentsOrBrowse(paneType, agentId, onRecent, browseFn) {
+    const recents = await fetchRecentContexts(paneType, agentId);
+    if (!recents || recents.length === 0) {
+      browseFn();
+      return;
+    }
+
+    const existing = document.getElementById('recents-picker');
+    if (existing) existing.remove();
+
+    const picker = document.createElement('div');
+    picker.id = 'recents-picker';
+    picker.className = 'pane-menu';
+    picker.style.cssText = 'min-width:220px; max-width:360px;';
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:8px 14px 4px; font-size:11px; color:rgba(255,255,255,0.35); font-weight:500; text-transform:uppercase; letter-spacing:0.5px;';
+    header.textContent = 'Recent';
+    picker.appendChild(header);
+
+    // Recent items
+    for (const r of recents) {
+      const btn = document.createElement('button');
+      btn.className = 'menu-item';
+      btn.setAttribute('data-nav-item', '');
+      const displayLabel = escapeHtml(r.label || r.context);
+      const displayPath = r.label && r.label !== r.context ? `<span style="opacity:0.4; font-size:11px; margin-left:6px;">${escapeHtml(r.context)}</span>` : '';
+      btn.innerHTML = `<span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${displayLabel}${displayPath}</span>`;
+      btn.addEventListener('click', () => {
+        nav.cleanup();
+        document.removeEventListener('click', closeHandler);
+        picker.remove();
+        onRecent(r.context, r.label);
+      });
+      btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(255,255,255,0.1)'; });
+      btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
+      picker.appendChild(btn);
+    }
+
+    // Divider
+    const divider = document.createElement('div');
+    divider.style.cssText = 'height:1px; background:rgba(255,255,255,0.08); margin:4px 8px;';
+    picker.appendChild(divider);
+
+    // Browse button
+    const browseBtn = document.createElement('button');
+    browseBtn.className = 'menu-item';
+    browseBtn.setAttribute('data-nav-item', '');
+    browseBtn.innerHTML = '<span style="opacity:0.6;">Browse...</span>';
+    browseBtn.addEventListener('click', () => {
+      nav.cleanup();
+      document.removeEventListener('click', closeHandler);
+      picker.remove();
+      browseFn();
+    });
+    browseBtn.addEventListener('mouseenter', () => { browseBtn.style.background = 'rgba(255,255,255,0.1)'; });
+    browseBtn.addEventListener('mouseleave', () => { browseBtn.style.background = 'none'; });
+    picker.appendChild(browseBtn);
+
+    // Position near the add button
+    const addBtn = document.getElementById('add-pane-btn');
+    if (addBtn) {
+      const rect = addBtn.getBoundingClientRect();
+      picker.style.top = (rect.bottom + 8) + 'px';
+      picker.style.right = '16px';
+    }
+
+    document.body.appendChild(picker);
+
+    const nav = attachPickerKeyboardNav(picker, {
+      onEscape: () => {
+        document.removeEventListener('click', closeHandler);
+        picker.remove();
+      }
+    });
+
+    const closeHandler = (e) => {
+      if (!picker.contains(e.target)) {
+        nav.cleanup();
+        picker.remove();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
+  }
+
   function cloudDeleteLayout(paneId) {
     if (cloudLayoutTimers.has(paneId)) {
       clearTimeout(cloudLayoutTimers.get(paneId));
@@ -4361,6 +4473,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       state.panes.push(pane);
       renderFilePane(pane);
       cloudSaveLayout(pane);
+      saveRecentContext('file', pane.filePath, pane.fileName, resolvedAgentId);
 
     } catch (e) {
       console.error('[App] Failed to create file pane:', e);
@@ -4618,6 +4731,33 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       state.panes.push(pane);
       renderIframePane(pane);
       cloudSaveLayout(pane);
+      try { saveRecentContext('iframe', pane.url, new URL(pane.url).hostname); } catch (_) { saveRecentContext('iframe', pane.url, pane.url); }
+    } catch (e) {
+      console.error('[App] Failed to create iframe pane:', e);
+      alert('Failed to create iframe: ' + e.message);
+    }
+  }
+
+  // Create iframe pane with a pre-known URL (skips prompt)
+  async function createIframePaneWithUrl(url, placementPos) {
+    const position = calcPlacementPos(placementPos, 400, 300);
+    try {
+      const iframeData = await agentRequest('POST', '/api/iframes', { url, position, size: PANE_DEFAULTS['iframe'] });
+      const pane = {
+        id: iframeData.id,
+        type: 'iframe',
+        x: iframeData.position.x,
+        y: iframeData.position.y,
+        width: iframeData.size.width,
+        height: iframeData.size.height,
+        zIndex: state.nextZIndex++,
+        url: iframeData.url,
+        agentId: activeAgentId
+      };
+      state.panes.push(pane);
+      renderIframePane(pane);
+      cloudSaveLayout(pane);
+      try { saveRecentContext('iframe', pane.url, new URL(pane.url).hostname); } catch (_) { saveRecentContext('iframe', pane.url, pane.url); }
     } catch (e) {
       console.error('[App] Failed to create iframe pane:', e);
       alert('Failed to create iframe: ' + e.message);
@@ -4651,6 +4791,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       state.panes.push(pane);
       renderGitGraphPane(pane);
       cloudSaveLayout(pane);
+      saveRecentContext('git-graph', pane.repoPath, pane.repoName, resolvedAgentId);
 
     } catch (e) {
       console.error('[App] Failed to create git graph pane:', e);
@@ -5678,6 +5819,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       state.panes.push(pane);
       renderFolderPane(pane);
       cloudSaveLayout(pane);
+      saveRecentContext('folder', pane.folderPath, pane.folderPath.split('/').filter(Boolean).pop() || pane.folderPath, resolvedAgentId);
     } catch (e) {
       console.error('[App] Failed to create folder pane:', e);
       alert('Failed to create folder pane: ' + e.message);
@@ -5709,6 +5851,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       state.panes.push(pane);
       renderBeadsPane(pane);
       cloudSaveLayout(pane);
+      saveRecentContext('beads', pane.projectPath, pane.projectPath.split('/').filter(Boolean).pop() || pane.projectPath, resolvedAgentId);
     } catch (e) {
       console.error('[App] Failed to create beads pane:', e);
       alert('Failed to create beads pane: ' + e.message);
@@ -8934,22 +9077,37 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
   async function openFileWithDevicePickerThenPlace() {
     showDevicePickerGeneric(
-      (d) => showFileBrowser(d.name, '~', null, true, d.ip),
+      (d) => showRecentsOrBrowse('file', d.ip,
+        (filePath, fileName) => enterPlacementMode('file', (pos) => createFilePaneFromRemote(d.name, filePath, pos, d.ip)),
+        () => showFileBrowser(d.name, '~', null, true, d.ip)
+      ),
       (e) => alert('Failed to list devices: ' + e.message)
     );
   }
 
   async function showGitRepoPickerWithDeviceThenPlace() {
     showDevicePickerGeneric(
-      (d) => showGitRepoPicker(d.name, null, true, d.ip),
-      () => showGitRepoPicker(undefined, null, true)
+      (d) => showRecentsOrBrowse('git-graph', d.ip,
+        (repoPath) => enterPlacementMode('git-graph', (pos) => createGitGraphPane(repoPath, d.name, pos, d.ip)),
+        () => showGitRepoPicker(d.name, null, true, d.ip)
+      ),
+      () => showRecentsOrBrowse('git-graph', activeAgentId,
+        (repoPath) => enterPlacementMode('git-graph', (pos) => createGitGraphPane(repoPath, undefined, pos)),
+        () => showGitRepoPicker(undefined, null, true)
+      )
     );
   }
 
   async function showFolderPaneDevicePickerThenPlace() {
     showDevicePickerGeneric(
-      (d) => showFolderPickerThenPlace(d.ip, d.name),
-      () => showFolderPickerThenPlace()
+      (d) => showRecentsOrBrowse('folder', d.ip,
+        (folderPath) => enterPlacementMode('folder', (pos) => createFolderPane(folderPath, pos, d.ip, d.name)),
+        () => showFolderPickerThenPlace(d.ip, d.name)
+      ),
+      () => showRecentsOrBrowse('folder', activeAgentId,
+        (folderPath) => enterPlacementMode('folder', (pos) => createFolderPane(folderPath, pos)),
+        () => showFolderPickerThenPlace()
+      )
     );
   }
 
@@ -8978,8 +9136,14 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   // Scans for git repos that contain a .beads/ directory.
   async function showBeadsRepoPickerWithDeviceThenPlace() {
     showDevicePickerGeneric(
-      (d) => showBeadsRepoPickerThenPlace(d.ip, d.name),
-      () => showBeadsRepoPickerThenPlace()
+      (d) => showRecentsOrBrowse('beads', d.ip,
+        (projectPath) => enterPlacementMode('beads', (pos) => createBeadsPane(projectPath, pos, d.ip, d.name)),
+        () => showBeadsRepoPickerThenPlace(d.ip, d.name)
+      ),
+      () => showRecentsOrBrowse('beads', activeAgentId,
+        (projectPath) => enterPlacementMode('beads', (pos) => createBeadsPane(projectPath, pos)),
+        () => showBeadsRepoPickerThenPlace()
+      )
     );
   }
 
@@ -9109,7 +9273,10 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       } else if (type === 'git-graph') {
         showGitRepoPickerWithDeviceThenPlace();
       } else if (type === 'iframe') {
-        enterPlacementMode('iframe', (pos) => createIframePane(pos));
+        showRecentsOrBrowse('iframe', activeAgentId,
+          (url) => enterPlacementMode('iframe', (pos) => createIframePaneWithUrl(url, pos)),
+          () => enterPlacementMode('iframe', (pos) => createIframePane(pos))
+        );
       } else if (type === 'beads') {
         showBeadsRepoPickerWithDeviceThenPlace();
       } else if (type === 'folder') {
