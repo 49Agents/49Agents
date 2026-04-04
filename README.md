@@ -52,9 +52,9 @@ cd 49Agents
 
 Open `http://localhost:1071`. No account, no login, no token.
 
-Don't want to self-host? **[49agents.com](https://49agents.com)**
+Don't want to self-host? **[49agents.com](https://app.49agents.com)**
+![tutorial](https://github.com/user-attachments/assets/776a96c7-35ae-495a-8c15-ee847b3dcd57)
 
-<img width="100%" alt="49Agents tutorial" src="https://github.com/user-attachments/assets/418d37c3-d52e-4de7-9726-28844527eca2" />
 
 ---
 
