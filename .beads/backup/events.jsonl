@@ -41,3 +41,7 @@
 {"actor":"MYRADhub","comment":"Added label: feature","created_at":"2026-04-03T12:32:18Z","event_type":"label_added","id":41,"issue_id":"bd_49Agents-0zg","new_value":null,"old_value":null}
 {"actor":"MYRADhub","comment":"Added label: frontend","created_at":"2026-04-03T12:32:18Z","event_type":"label_added","id":42,"issue_id":"bd_49Agents-0zg","new_value":null,"old_value":null}
 {"actor":"MYRADhub","comment":"Added label: ux","created_at":"2026-04-03T12:32:18Z","event_type":"label_added","id":43,"issue_id":"bd_49Agents-0zg","new_value":null,"old_value":null}
+{"actor":"MYRADhub","comment":null,"created_at":"2026-04-05T15:37:05Z","event_type":"created","id":44,"issue_id":"bd_49Agents-d9c","new_value":"","old_value":""}
+{"actor":"MYRADhub","comment":"Added label: feature","created_at":"2026-04-05T15:37:05Z","event_type":"label_added","id":45,"issue_id":"bd_49Agents-d9c","new_value":null,"old_value":null}
+{"actor":"MYRADhub","comment":"Added label: frontend","created_at":"2026-04-05T15:37:05Z","event_type":"label_added","id":46,"issue_id":"bd_49Agents-d9c","new_value":null,"old_value":null}
+{"actor":"MYRADhub","comment":"Added label: agent","created_at":"2026-04-05T15:37:05Z","event_type":"label_added","id":47,"issue_id":"bd_49Agents-d9c","new_value":null,"old_value":null}
