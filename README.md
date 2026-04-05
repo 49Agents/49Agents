@@ -1,5 +1,5 @@
 <p align="center">
-  <img alt="49Agents" src="https://github.com/user-attachments/assets/93d237b6-e1ec-40ea-aa30-6feb72ca6599" height="120" />
+  <img alt="49Agents" src="https://github.com/user-attachments/assets/4ee43d8f-75de-4305-98ca-09b4a96e1e5f" height="120" />
 </p>
 
 <h1 align="center">49Agents</h1>
@@ -14,13 +14,13 @@
   <a href="https://twitter.com/49agents"><img src="https://img.shields.io/twitter/follow/49agents" alt="Twitter Follow" /></a>
 </p>
 
-**Before:**
+<h3 align="center">Before:</h3>
 
-<img width="100%" alt="Before — terminal clutter" src="https://github.com/user-attachments/assets/b06c8fe8-d1bf-432a-b935-bbf8376bd7ff" />
+<img width="100%" alt="Before — terminal clutter" src="https://github.com/user-attachments/assets/d611bbc2-16ee-4a18-baed-3a1cbf2a7306" />
 
-**After:**
+<h3 align="center">After:</h3>
 
-<img width="100%" alt="After — 49Agents" src="https://github.com/user-attachments/assets/878b3926-e017-4ccc-9c54-315b647fd417" />
+<img width="100%" alt="After — 49Agents" src="https://github.com/user-attachments/assets/07ebd445-2eb7-4ee4-b18a-49abf9549c0d" />
 
 ---
 
