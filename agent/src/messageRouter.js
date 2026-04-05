@@ -6,6 +6,7 @@ import { noteService } from '../services/notes.js';
 import { gitGraphService } from '../services/gitGraph.js';
 import { iframeService } from '../services/iframes.js';
 import { beadsService } from '../services/beads.js';
+import { conversationsService } from '../services/conversations.js';
 import { folderPaneService } from '../services/folderPanes.js';
 import { getLocalMetrics } from '../services/metrics.js';
 import { performUpdate } from './updater.js';
@@ -386,6 +387,17 @@ export function createMessageRouter(sendToRelay, options = {}) {
           return respond(200, beadsPane);
         }
 
+        // === Conversations Panes ===
+        case 'GET /api/conversations-panes': {
+          const convosPanes = conversationsService.listConversationsPanes();
+          return respond(200, convosPanes);
+        }
+        case 'POST /api/conversations-panes': {
+          const { dirPath, position, size, device } = body;
+          const convosPane = conversationsService.createConversationsPane({ dirPath, position, size, device });
+          return respond(200, convosPane);
+        }
+
         // === Folder Panes ===
         case 'GET /api/folder-panes': {
           const folderPanes = folderPaneService.listFolderPanes();
@@ -678,6 +690,32 @@ export function createMessageRouter(sendToRelay, options = {}) {
         }
         if (method === 'DELETE') {
           beadsService.deleteBeadsPane(id);
+          return respond(200, { success: true });
+        }
+      }
+
+      // Conversations pane routes: GET /api/conversations-panes/:id/data, PATCH/DELETE /api/conversations-panes/:id
+      const convosDataMatch = path.match(/^\/api\/conversations-panes\/([^/]+)\/data$/);
+      if (convosDataMatch && method === 'GET') {
+        const id = convosDataMatch[1];
+        const convosPane = conversationsService.getConversationsPane(id);
+        if (!convosPane) return respond(404, { error: 'Conversations pane not found' });
+        const depth = parseInt(query.depth) || 0;
+        const conversations = await conversationsService.scanConversations(convosPane.dirPath, Math.min(depth, 3));
+        return respond(200, { conversations, dirPath: convosPane.dirPath, depth, timestamp: Date.now() });
+      }
+
+      const convosPaneMatch = path.match(/^\/api\/conversations-panes\/([^/]+)$/);
+      if (convosPaneMatch) {
+        const id = convosPaneMatch[1];
+        if (method === 'PATCH') {
+          const updates = {};
+          if (body.dirPath !== undefined) updates.dirPath = body.dirPath;
+          conversationsService.updateConversationsPane(id, updates);
+          return respond(200, { success: true });
+        }
+        if (method === 'DELETE') {
+          conversationsService.deleteConversationsPane(id);
           return respond(200, { success: true });
         }
       }

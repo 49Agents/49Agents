@@ -3,7 +3,7 @@ import { FitAddon } from './lib/addon-fit.mjs';
 import { WebLinksAddon } from './lib/addon-web-links.mjs';
 import { playDismissSound, playNotificationSound, setSoundEnabled as _setSoundEnabled } from './modules/sounds.js';
 import { escapeHtml, formatBytes, metricColorClass, formatLocationPath, isExternalInputFocused, truncateUrl, isAgentVersionOutdated, getTerminalFontFamily } from './modules/utils.js';
-import { PANE_DEFAULTS, PANE_ENDPOINT_MAP, ICON_BEADS, ICON_GIT_GRAPH, ICON_FOLDER, CLAUDE_STATE_SVGS, CLAUDE_LOGO_SVG, RESET_ICON_SVG, WIFI_OFF_SVG, DEVICE_COLORS, TERMINAL_FONTS, CANVAS_BACKGROUNDS, osIcon } from './modules/constants.js';
+import { PANE_DEFAULTS, PANE_ENDPOINT_MAP, ICON_BEADS, ICON_GIT_GRAPH, ICON_FOLDER, ICON_CONVERSATIONS, CLAUDE_STATE_SVGS, CLAUDE_LOGO_SVG, RESET_ICON_SVG, WIFI_OFF_SVG, DEVICE_COLORS, TERMINAL_FONTS, CANVAS_BACKGROUNDS, osIcon } from './modules/constants.js';
 import { initMinimap, startMinimapLoop, hideMinimap, renderMinimap, getCanvasBounds, calcPlacementPos, setMinimapEnabled, getMinimapEnabled } from './modules/minimap.js';
 import { initNotificationDeps, initNotifications, showPromoToasts, showToast, dismissToast, snoozeNotification, sendBrowserNotification, updateTabTitleBadge, handleStateTransition, previousClaudeStates, notifiedStates, activeToasts, snoozedNotifications, snoozeCount, getIsFirstClaudeStateUpdate, setIsFirstClaudeStateUpdate, getNotificationContainer } from './modules/notifications.js';
 import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modules/git-graph.js';
@@ -396,6 +396,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       if (pane.repoName) metadata.repoName = pane.repoName;
       if (pane.graphMode && pane.graphMode !== 'svg') metadata.graphMode = pane.graphMode;
       if (pane.projectPath) metadata.projectPath = pane.projectPath;
+      if (pane.dirPath) metadata.dirPath = pane.dirPath;
       if (pane.claudeSessionId) metadata.claudeSessionId = pane.claudeSessionId;
       if (pane.claudeSessionName) metadata.claudeSessionName = pane.claudeSessionName;
       if (pane.workingDir) metadata.workingDir = pane.workingDir;
@@ -3533,6 +3534,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       case 'beads':
         titleHtml = `${deviceTag}<svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align: middle; margin-right: 4px;">${ICON_BEADS}</svg> Beads Issues`;
         break;
+      case 'conversations': {
+        const shortDir = (paneData.dirPath || '').replace(/^\/home\/[^/]+/, '~').replace(/^\/Users\/[^/]+/, '~');
+        titleHtml = `${deviceTag}<svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align: middle; margin-right: 4px;">${ICON_CONVERSATIONS}</svg> ${escapeHtml(shortDir)}`;
+        break;
+      }
       case 'git-graph':
         titleHtml = `${deviceTag}<svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align: middle; margin-right: 4px;">${ICON_GIT_GRAPH}</svg> ${escapeHtml(paneData.repoName || 'Git Graph')}`;
         break;
@@ -3611,6 +3617,10 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       defPos: { x: 100, y: 100 }, defSize: PANE_DEFAULTS['folder'],
       extraFields: (f) => ({ folderPath: f.folderPath, device: f.device || null }),
       render: renderFolderPane },
+    { type: 'conversations', endpoint: '/api/conversations-panes',
+      defPos: { x: 100, y: 100 }, defSize: PANE_DEFAULTS['conversations'],
+      extraFields: (c) => ({ dirPath: c.dirPath, device: c.device || null }),
+      render: renderConversationsPane },
   ];
 
   async function loadPanesFromAgent(agentId, cloudLayoutMap) {
@@ -3646,6 +3656,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
           if (cl.metadata.textOnly) pane.textOnly = cl.metadata.textOnly;
           if (cl.metadata.folderPath) pane.folderPath = cl.metadata.folderPath;
           if (cl.metadata.beadsTag) pane.beadsTag = cl.metadata.beadsTag;
+          if (cl.metadata.dirPath) pane.dirPath = cl.metadata.dirPath;
           if (cl.metadata.claudeSessionId) pane.claudeSessionId = cl.metadata.claudeSessionId;
           if (cl.metadata.claudeSessionName) pane.claudeSessionName = cl.metadata.claudeSessionName;
           if (cl.metadata.workingDir) pane.workingDir = cl.metadata.workingDir;
@@ -3722,6 +3733,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
             if (meta.repoName) pane.repoName = meta.repoName;
             if (meta.graphMode) pane.graphMode = meta.graphMode;
             if (meta.projectPath) pane.projectPath = meta.projectPath;
+            if (meta.dirPath) pane.dirPath = meta.dirPath;
             if (meta.beadsTag) pane.beadsTag = meta.beadsTag;
             if (meta.workingDir) pane.workingDir = meta.workingDir;
             if (meta.claudeSessionId) pane.claudeSessionId = meta.claudeSessionId;
@@ -9099,6 +9111,249 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     );
   }
 
+  // ── Conversations Pane ──
+
+  async function createConversationsPane(dirPath, placementPos, targetAgentId, device) {
+    const resolvedAgentId = targetAgentId || activeAgentId;
+    const position = calcPlacementPos(placementPos, 260, 250);
+
+    try {
+      const reqBody = { dirPath, position, size: PANE_DEFAULTS['conversations'] };
+      if (device) reqBody.device = device;
+      const cpData = await agentRequest('POST', '/api/conversations-panes', reqBody, resolvedAgentId);
+
+      const pane = {
+        id: cpData.id,
+        type: 'conversations',
+        x: cpData.position.x,
+        y: cpData.position.y,
+        width: cpData.size.width,
+        height: cpData.size.height,
+        zIndex: state.nextZIndex++,
+        dirPath: cpData.dirPath,
+        device: device || cpData.device || null,
+        agentId: resolvedAgentId,
+        includeSubdirs: false,
+      };
+
+      state.panes.push(pane);
+      renderConversationsPane(pane);
+      cloudSaveLayout(pane);
+      saveRecentContext('conversations', pane.dirPath, pane.dirPath.split('/').filter(Boolean).pop() || pane.dirPath, resolvedAgentId);
+    } catch (e) {
+      console.error('[App] Failed to create conversations pane:', e);
+      alert('Failed to create conversations pane: ' + e.message);
+    }
+  }
+
+  function renderConversationsPane(paneData) {
+    const existingPane = document.getElementById(`pane-${paneData.id}`);
+    if (existingPane) existingPane.remove();
+
+    const pane = document.createElement('div');
+    pane.className = 'pane conversations-pane';
+    pane.id = `pane-${paneData.id}`;
+    pane.style.left = `${paneData.x}px`;
+    pane.style.top = `${paneData.y}px`;
+    pane.style.width = `${paneData.width}px`;
+    pane.style.height = `${paneData.height}px`;
+    pane.style.zIndex = paneData.zIndex;
+    pane.dataset.paneId = paneData.id;
+
+    if (!paneData.shortcutNumber) paneData.shortcutNumber = getNextShortcutNumber();
+    const deviceTag = paneData.device ? deviceLabelHtml(paneData.device) : '';
+    const shortDir = (paneData.dirPath || '').replace(/^\/home\/[^/]+/, '~').replace(/^\/Users\/[^/]+/, '~');
+    pane.innerHTML = `
+      <div class="pane-header">
+        <span class="pane-title convos-title">
+          ${deviceTag}<svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align: middle; margin-right: 4px;">${ICON_CONVERSATIONS}</svg>
+          Claude Sessions
+        </span>
+        ${paneNameHtml(paneData)}
+        <div class="pane-header-right">
+          ${shortcutBadgeHtml(paneData)}
+          <button class="pane-close" aria-label="Close pane"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+      </div>
+      <div class="convos-toolbar">
+        <span class="convos-dir-label" title="${escapeHtml(paneData.dirPath)}">${escapeHtml(shortDir)}</span>
+        <label class="convos-toggle-label">
+          <input type="checkbox" class="convos-subdirs-toggle" ${paneData.includeSubdirs ? 'checked' : ''}>
+          <span class="convos-toggle-text">Subdirs</span>
+        </label>
+        <button class="convos-refresh-btn" title="Refresh"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
+      </div>
+      <div class="convos-list"></div>
+      <div class="pane-resize-handle"></div>
+    `;
+
+    setupPaneListeners(pane, paneData);
+
+    // Subdirs toggle
+    const subdirToggle = pane.querySelector('.convos-subdirs-toggle');
+    subdirToggle.addEventListener('change', () => {
+      paneData.includeSubdirs = subdirToggle.checked;
+      fetchConversationsData(pane, paneData);
+    });
+
+    // Refresh button
+    const refreshBtn = pane.querySelector('.convos-refresh-btn');
+    refreshBtn.addEventListener('click', () => fetchConversationsData(pane, paneData));
+
+    canvas.appendChild(pane);
+
+    // Initial data fetch
+    fetchConversationsData(pane, paneData);
+  }
+
+  async function fetchConversationsData(pane, paneData) {
+    const listEl = pane.querySelector('.convos-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="convos-loading">Loading conversations...</div>';
+
+    try {
+      const depth = paneData.includeSubdirs ? 3 : 0;
+      const data = await agentRequest('GET',
+        `/api/conversations-panes/${paneData.id}/data?depth=${depth}`,
+        null, paneData.agentId);
+
+      const conversations = data.conversations || [];
+      listEl.innerHTML = '';
+
+      if (conversations.length === 0) {
+        listEl.innerHTML = '<div class="convos-empty">No Claude conversations found for this directory.</div>';
+        return;
+      }
+
+      // Get current Claude states for active indicator
+      let claudeStates = {};
+      try {
+        const statesData = await agentRequest('GET', '/api/terminals/states', null, paneData.agentId);
+        claudeStates = statesData || {};
+      } catch {}
+
+      // Build a set of active session IDs from Claude states
+      const activeSessionIds = new Set();
+      for (const [, stateInfo] of Object.entries(claudeStates)) {
+        if (stateInfo.isClaude && stateInfo.claudeSessionId) {
+          activeSessionIds.add(stateInfo.claudeSessionId);
+        }
+      }
+
+      // Also build a map of session ID -> state for status indicator
+      const sessionStateMap = {};
+      for (const [, stateInfo] of Object.entries(claudeStates)) {
+        if (stateInfo.isClaude && stateInfo.claudeSessionId) {
+          sessionStateMap[stateInfo.claudeSessionId] = stateInfo.state;
+        }
+      }
+
+      for (const convo of conversations) {
+        const isActive = activeSessionIds.has(convo.sessionId);
+        const claudeState = sessionStateMap[convo.sessionId] || null;
+        const item = document.createElement('div');
+        item.className = 'convos-item' + (isActive ? ' convos-item-active' : '');
+        item.setAttribute('data-nav-item', '');
+
+        const title = convo.customTitle || convo.firstPrompt || convo.sessionId.slice(0, 8);
+        const truncatedTitle = title.length > 80 ? title.slice(0, 80) + '...' : title;
+
+        // Time display
+        const modified = new Date(convo.lastModified);
+        const now = new Date();
+        const diffMs = now - modified;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        let timeStr;
+        if (diffMins < 1) timeStr = 'just now';
+        else if (diffMins < 60) timeStr = `${diffMins}m ago`;
+        else if (diffHours < 24) timeStr = `${diffHours}h ago`;
+        else if (diffDays < 7) timeStr = `${diffDays}d ago`;
+        else timeStr = modified.toLocaleDateString();
+
+        // Status indicator
+        let statusHtml = '';
+        if (isActive) {
+          const stateClass = claudeState === 'working' ? 'working' : (claudeState === 'idle' ? 'idle' : 'active');
+          const stateLabel = claudeState === 'working' ? 'Working' : (claudeState === 'idle' ? 'Idle' : (claudeState === 'permission_needed' ? 'Needs Input' : 'Active'));
+          statusHtml = `<span class="convos-status convos-status-${stateClass}">${stateLabel}</span>`;
+        }
+
+        // Metadata tags
+        let metaHtml = '';
+        if (convo.gitBranch && convo.gitBranch !== 'HEAD') {
+          metaHtml += `<span class="convos-meta-tag convos-tag-branch" title="Branch: ${escapeHtml(convo.gitBranch)}">${escapeHtml(convo.gitBranch.length > 30 ? convo.gitBranch.slice(0, 30) + '...' : convo.gitBranch)}</span>`;
+        }
+        if (convo.beadsIssueId) {
+          metaHtml += `<span class="convos-meta-tag convos-tag-beads" title="Beads: ${escapeHtml(convo.beadsIssueId)}">${escapeHtml(convo.beadsIssueId)}</span>`;
+        }
+        if (convo.worktree) {
+          metaHtml += `<span class="convos-meta-tag convos-tag-worktree" title="Worktree: ${escapeHtml(convo.worktree)}">WT</span>`;
+        }
+
+        item.innerHTML = `
+          <div class="convos-item-header">
+            <span class="convos-item-indicator ${isActive ? 'active' : 'inactive'}"></span>
+            <span class="convos-item-title">${escapeHtml(truncatedTitle)}</span>
+            ${statusHtml}
+            <span class="convos-item-time">${timeStr}</span>
+          </div>
+          ${metaHtml ? `<div class="convos-item-meta">${metaHtml}</div>` : ''}
+        `;
+
+        item.addEventListener('mouseenter', () => { item.style.background = 'rgba(var(--accent-rgb),0.1)'; });
+        item.addEventListener('mouseleave', () => { item.style.background = ''; });
+
+        listEl.appendChild(item);
+      }
+
+      // Update pane title with count
+      const titleEl = pane.querySelector('.convos-title');
+      if (titleEl) {
+        const activeCount = conversations.filter(c => activeSessionIds.has(c.sessionId)).length;
+        const countStr = activeCount > 0 ? ` (${activeCount} active / ${conversations.length})` : ` (${conversations.length})`;
+        titleEl.innerHTML = `${paneData.device ? deviceLabelHtml(paneData.device) : ''}<svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align: middle; margin-right: 4px;">${ICON_CONVERSATIONS}</svg> Claude Sessions${countStr}`;
+      }
+    } catch (e) {
+      console.error('[App] Failed to fetch conversations:', e);
+      listEl.innerHTML = `<div class="convos-error">Failed to load: ${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  async function showConversationsDirPickerThenPlace() {
+    showDevicePickerGeneric(
+      (d) => showRecentsOrBrowse('conversations', d.ip,
+        (dirPath) => enterPlacementMode('conversations', (pos) => createConversationsPane(dirPath, pos, d.ip, d.name)),
+        () => showConvosFolderPickerThenPlace(d.ip, d.name)
+      ),
+      () => showRecentsOrBrowse('conversations', activeAgentId,
+        (dirPath) => enterPlacementMode('conversations', (pos) => createConversationsPane(dirPath, pos)),
+        () => showConvosFolderPickerThenPlace()
+      )
+    );
+  }
+
+  async function showConvosFolderPickerThenPlace(targetAgentId, device) {
+    const deviceLabel = device ? deviceLabelHtml(device, 'font-size:11px; padding:2px 8px;') : '';
+    const headerHTML = `
+      <svg viewBox="0 0 24 24" width="16" height="16" style="color:rgba(255,255,255,0.6);">${ICON_CONVERSATIONS}</svg>
+      ${deviceLabel}
+      <span style="color:rgba(255,255,255,0.7); font-size:13px; font-weight:500;">Choose Directory</span>`;
+
+    showFolderScanPicker({
+      id: 'convos-dir-browser',
+      headerHTML,
+      scanLabel: 'Show conversations for this directory',
+      device,
+      targetAgentId,
+      onScan: async (folderPath, contentArea, closeBrowser) => {
+        closeBrowser();
+        enterPlacementMode('conversations', (pos) => createConversationsPane(folderPath, pos, targetAgentId, device));
+      }
+    });
+  }
+
   async function showFolderPaneDevicePickerThenPlace() {
     showDevicePickerGeneric(
       (d) => showRecentsOrBrowse('folder', d.ip,
@@ -9282,6 +9537,8 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         showBeadsRepoPickerWithDeviceThenPlace();
       } else if (type === 'folder') {
         showFolderPaneDevicePickerThenPlace();
+      } else if (type === 'conversations') {
+        showConversationsDirPickerThenPlace();
       }
     }
 

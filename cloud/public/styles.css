@@ -5691,3 +5691,182 @@ body.cursor-suppressed .pane { pointer-events: none !important; }
   }
 }
 
+/* === Conversations Pane === */
+.conversations-pane { background: rgba(12, 12, 28, 0.95); }
+.conversations-pane .pane-header { background: rgba(20, 20, 45, 0.9); cursor: grab; }
+
+.convos-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.convos-dir-label {
+  color: rgba(255,255,255,0.4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.convos-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  color: rgba(255,255,255,0.5);
+  user-select: none;
+}
+
+.convos-toggle-label input[type="checkbox"] {
+  width: 12px;
+  height: 12px;
+  cursor: pointer;
+  accent-color: var(--accent, #e8a882);
+}
+
+.convos-toggle-text {
+  font-size: 11px;
+}
+
+.convos-refresh-btn {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.4);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+}
+.convos-refresh-btn:hover { color: rgba(255,255,255,0.9); background: rgba(255,255,255,0.1); }
+
+.convos-list {
+  overflow-y: auto;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.1) transparent;
+}
+
+.convos-loading, .convos-empty, .convos-error {
+  padding: 24px;
+  text-align: center;
+  color: rgba(255,255,255,0.3);
+  font-size: 12px;
+}
+
+.convos-error { color: rgba(255,120,120,0.6); }
+
+.convos-item {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  cursor: default;
+  transition: background 0.1s;
+}
+
+.convos-item-active {
+  border-left: 2px solid var(--accent, #e8a882);
+  padding-left: 10px;
+}
+
+.convos-item-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.convos-item-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.convos-item-indicator.active {
+  background: #4ade80;
+  box-shadow: 0 0 4px rgba(74, 222, 128, 0.5);
+}
+
+.convos-item-indicator.inactive {
+  background: rgba(255,255,255,0.15);
+}
+
+.convos-item-title {
+  flex: 1;
+  color: rgba(255,255,255,0.85);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.convos-status {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.convos-status-working {
+  background: rgba(251, 191, 36, 0.2);
+  color: rgba(251, 191, 36, 0.9);
+}
+
+.convos-status-idle {
+  background: rgba(74, 222, 128, 0.15);
+  color: rgba(74, 222, 128, 0.8);
+}
+
+.convos-status-active {
+  background: rgba(96, 165, 250, 0.2);
+  color: rgba(96, 165, 250, 0.9);
+}
+
+.convos-item-time {
+  font-size: 10px;
+  color: rgba(255,255,255,0.25);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.convos-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+  padding-left: 12px;
+}
+
+.convos-meta-tag {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.convos-tag-branch {
+  background: rgba(139, 92, 246, 0.15);
+  color: rgba(167, 139, 250, 0.85);
+}
+
+.convos-tag-beads {
+  background: rgba(232, 168, 130, 0.15);
+  color: rgba(232, 168, 130, 0.85);
+}
+
+.convos-tag-worktree {
+  background: rgba(34, 211, 238, 0.15);
+  color: rgba(34, 211, 238, 0.85);
+}
+
