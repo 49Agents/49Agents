@@ -1693,14 +1693,15 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     if (diff <= 0) return 'now';
     const h = Math.floor(diff / 3600000);
     const m = Math.floor((diff % 3600000) / 60000);
-    // 24시간 이상이면 KST 절대 날짜/시간으로 표시
+    // 24시간 이상이면 브라우저 로컬 타임존 절대 날짜/시간으로 표시
     if (h >= 24) {
-      const kst = new Date(target.getTime() + 9 * 3600000);
-      const mon = kst.getUTCMonth() + 1;
-      const day = kst.getUTCDate();
-      const hr = String(kst.getUTCHours()).padStart(2, '0');
-      const min = String(kst.getUTCMinutes()).padStart(2, '0');
-      return `${mon}/${day} ${hr}:${min} KST`;
+      const mon = target.getMonth() + 1;
+      const day = target.getDate();
+      const hr = String(target.getHours()).padStart(2, '0');
+      const min = String(target.getMinutes()).padStart(2, '0');
+      // 짧은 타임존 약어 (e.g. KST, PST, EST)
+      const tz = Intl.DateTimeFormat('en', { timeZoneName: 'short' }).formatToParts(target).find(p => p.type === 'timeZoneName')?.value || '';
+      return `${mon}/${day} ${hr}:${min} ${tz}`;
     }
     if (h > 0) return `${h}h ${m}m`;
     return `${m}m`;
