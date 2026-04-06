@@ -1248,6 +1248,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
     // Remove focused state like QV does
     document.querySelectorAll('.pane.focused').forEach(p => p.classList.remove('focused'));
+    document.querySelectorAll('.pane.depth-blur').forEach(p => p.classList.remove('depth-blur'));
   }
 
   function clearDeviceHighlight() {
@@ -4084,19 +4085,19 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   let createPaneQueue = Promise.resolve();
 
   // Create a new terminal pane
-  function createPane(device, placementPos, targetAgentId) {
-    const task = createPaneQueue.then(() => _createPaneImpl(device, placementPos, targetAgentId));
+  function createPane(device, placementPos, targetAgentId, workingDir) {
+    const task = createPaneQueue.then(() => _createPaneImpl(device, placementPos, targetAgentId, workingDir));
     createPaneQueue = task.catch(() => {});
     return task;
   }
 
-  async function _createPaneImpl(device, placementPos, targetAgentId) {
+  async function _createPaneImpl(device, placementPos, targetAgentId, workingDir) {
     const resolvedAgentId = targetAgentId || activeAgentId;
 
     const position = calcPlacementPos(placementPos, 300, 200);
 
     try {
-      const reqBody = { workingDir: '~', position, size: PANE_DEFAULTS['terminal'] };
+      const reqBody = { workingDir: workingDir || '~', position, size: PANE_DEFAULTS['terminal'] };
       if (device) reqBody.device = device;
       const terminal = await agentRequest('POST', '/api/terminals', reqBody, resolvedAgentId);
 
@@ -5038,6 +5039,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         ${paneNameHtml(paneData)}
         <div class="pane-header-right">
           ${shortcutBadgeHtml(paneData)}
+          <button class="term-ctx-btn" data-action="clone" aria-label="Clone terminal" data-tooltip="Clone terminal"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
           <button class="term-ctx-btn" data-action="file" aria-label="Browse files" data-tooltip="Browse files from cwd"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></button>
           <button class="term-ctx-btn" data-action="git-graph" aria-label="Git graph" data-tooltip="Git graph from cwd"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="0">${ICON_GIT_GRAPH}</svg></button>
           <button class="term-ctx-btn" data-action="folder" aria-label="Open folder" data-tooltip="Open folder from cwd"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
@@ -7662,7 +7664,9 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         const cwd = paneData.workingDir || '~';
         const device = paneData.device;
         const agentId = paneData.agentId;
-        if (action === 'file') {
+        if (action === 'clone') {
+          enterPlacementMode('terminal', (pos) => createPane(device, pos, agentId, cwd));
+        } else if (action === 'file') {
           showFileBrowser(device, cwd, null, true, agentId);
         } else if (action === 'git-graph') {
           showGitRepoPicker(device, null, true, agentId, cwd);
@@ -8529,7 +8533,21 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       paneEl.classList.add('focused');
       lastFocusedPaneId = paneData.id;
 
-      // Quick View: overlays stay on all panes (no interaction in this mode)
+      // Depth-of-field: blur only panes that overlap with the focused pane
+      const fx = paneData.x, fy = paneData.y;
+      const fw = paneData.width || 0, fh = paneData.height || 0;
+      for (const p of state.panes) {
+        if (p.id === paneData.id) continue;
+        const el = document.getElementById(`pane-${p.id}`);
+        if (!el) continue;
+        const pw = p.width || 0, ph = p.height || 0;
+        const overlaps = fx < p.x + pw && fx + fw > p.x && fy < p.y + ph && fy + fh > p.y;
+        if (overlaps) {
+          el.classList.add('depth-blur');
+        } else {
+          el.classList.remove('depth-blur');
+        }
+      }
     }
   }
 
@@ -8802,6 +8820,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       });
       // Remove focused state from all panes
       document.querySelectorAll('.pane.focused').forEach(p => p.classList.remove('focused'));
+    document.querySelectorAll('.pane.depth-blur').forEach(p => p.classList.remove('depth-blur'));
     } else {
       document.querySelectorAll('.quick-view-overlay').forEach(o => o.remove());
       document.querySelectorAll('.pane.qv-hover').forEach(p => p.classList.remove('qv-hover'));
@@ -10458,6 +10477,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     document.body.classList.add('cursor-suppressed');
     // Clear all focused outlines — move mode has its own visual system
     document.querySelectorAll('.pane.focused').forEach(p => p.classList.remove('focused'));
+    document.querySelectorAll('.pane.depth-blur').forEach(p => p.classList.remove('depth-blur'));
     moveModeOriginalZoom = state.zoom;
 
     // Determine starting pane: last focused, or nearest to screen center

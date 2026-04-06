@@ -843,6 +843,16 @@ body.minimap-hidden #controls {
     inset 0 0 20px rgba(255, 255, 255, 0.05);
 }
 
+/* Depth-of-field: dim panes that overlap with the focused pane */
+.pane.depth-blur {
+  opacity: 0.55;
+  transition: opacity 0.3s ease;
+}
+
+.pane:not(.depth-blur) {
+  transition: opacity 0.3s ease;
+}
+
 /* Active dragging state */
 .pane.dragging {
   border-color: rgba(139, 92, 246, 0.8);
