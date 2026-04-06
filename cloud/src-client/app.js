@@ -793,7 +793,8 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   let hudHidden = false;
   let fleetPaneHidden = false;
   let agentsPaneHidden = false;
-  let agentsUsageData = null;
+  let agentsUsageData = null;       // legacy single-account (unused now)
+  let agentsUsageByAgent = {};      // agentId -> { hostname, data }
   let agentsUsageLastUpdated = null;
   let agentsUsageIntervalId = null;
   let agentsUsageFetchError = null;
@@ -1639,32 +1640,45 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     };
   }
 
-  async function fetchAgentsUsage(force = false) {
-    // Query agents sequentially — stop at first success.
-    // (usage data is per-account, so any agent returns the same data; parallel
-    // requests against the same OAuth token trigger Anthropic rate limits)
+  async function fetchAgentsUsage() {
+    // Query all online agents in parallel — collect per-agent results
     const onlineAgents = agents.filter(a => a.online);
     if (onlineAgents.length === 0) return;
-    const path = force ? '/api/usage?force=true' : '/api/usage';
-    let lastError = null;
-    for (const agent of onlineAgents) {
-      try {
-        const data = await agentRequest('GET', path, null, agent.agentId);
-        if (data) {
-          agentsUsageData = data;
-          if (!data.stale) agentsUsageLastUpdated = Date.now();
-          agentsUsageFetchError = null;
-          renderAgentsHud();
-          return;
+    try {
+      const results = await Promise.allSettled(
+        onlineAgents.map(a => agentRequest('GET', '/api/usage', null, a.agentId))
+      );
+      let anySuccess = false;
+      const newByAgent = {};
+      for (let i = 0; i < onlineAgents.length; i++) {
+        const a = onlineAgents[i];
+        const r = results[i];
+        if (r.status === 'fulfilled' && r.value) {
+          anySuccess = true;
+          newByAgent[a.agentId] = {
+            hostname: a.displayName || a.hostname || a.agentId,
+            data: r.value,
+          };
         }
-      } catch (e) {
-        lastError = e.message || 'Failed to fetch usage';
-        console.warn(`[usage] Agent ${agent.agentId.slice(0,8)} failed:`, e.message);
       }
+      if (anySuccess) {
+        agentsUsageByAgent = newByAgent;
+        // Keep legacy single-agent data as first result for header pct
+        const firstKey = Object.keys(newByAgent)[0];
+        agentsUsageData = newByAgent[firstKey].data;
+        agentsUsageLastUpdated = Date.now();
+        agentsUsageFetchError = null;
+      } else {
+        const firstErr = results.find(r => r.status === 'rejected');
+        agentsUsageFetchError = firstErr ? (firstErr.reason?.message || 'Failed to fetch usage') : 'No response from agents';
+        console.warn('[usage] All agents failed to return usage data');
+      }
+      renderAgentsHud();
+    } catch (e) {
+      agentsUsageFetchError = e.message || 'Unexpected error';
+      console.warn('[usage] fetchAgentsUsage error:', e);
+      renderAgentsHud();
     }
-    agentsUsageFetchError = lastError || 'No response from agents';
-    console.warn('[usage] All agents failed to return usage data');
-    renderAgentsHud();
   }
 
   function agentsUsageColorClass(pct) {
@@ -1674,10 +1688,20 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   }
 
   function agentsTimeUntil(isoDate) {
-    const diff = new Date(isoDate) - Date.now();
+    const target = new Date(isoDate);
+    const diff = target - Date.now();
     if (diff <= 0) return 'now';
     const h = Math.floor(diff / 3600000);
     const m = Math.floor((diff % 3600000) / 60000);
+    // 24시간 이상이면 KST 절대 날짜/시간으로 표시
+    if (h >= 24) {
+      const kst = new Date(target.getTime() + 9 * 3600000);
+      const mon = kst.getUTCMonth() + 1;
+      const day = kst.getUTCDate();
+      const hr = String(kst.getUTCHours()).padStart(2, '0');
+      const min = String(kst.getUTCMinutes()).padStart(2, '0');
+      return `${mon}/${day} ${hr}:${min} KST`;
+    }
     if (h > 0) return `${h}h ${m}m`;
     return `${m}m`;
   }
@@ -1689,12 +1713,20 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     const pctEl = hud.querySelector('#agents-hud-pct');
     const content = hud.querySelector('.agents-hud-content');
 
-    // Header: show shortest-term usage percentage
-    if (agentsUsageData && agentsUsageData.five_hour) {
-      const pct = agentsUsageData.five_hour.utilization;
-      const cls = agentsUsageColorClass(pct);
+    const agentEntries = Object.values(agentsUsageByAgent);
+
+    // Header: show worst (highest) 5-hour usage across all accounts
+    let worstPct = null;
+    for (const entry of agentEntries) {
+      if (entry.data && entry.data.five_hour) {
+        const p = entry.data.five_hour.utilization;
+        if (worstPct === null || p > worstPct) worstPct = p;
+      }
+    }
+    if (worstPct !== null) {
+      const cls = agentsUsageColorClass(worstPct);
       if (pctEl) {
-        pctEl.textContent = pct + '%';
+        pctEl.textContent = (agentEntries.length > 1 ? 'max ' : '') + worstPct + '%';
         pctEl.className = 'agents-hud-pct ' + cls;
       }
     } else if (pctEl) {
@@ -1707,8 +1739,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       return;
     }
 
-    // Expanded: usage bars
-    if (!agentsUsageData) {
+    if (agentEntries.length === 0) {
       content.innerHTML = '<div class="agents-empty">Loading...</div>';
       return;
     }
@@ -1734,10 +1765,19 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       `;
     }
 
-    addBlock('5-hour window', agentsUsageData.five_hour);
-    addBlock('7-day window', agentsUsageData.seven_day);
-    addBlock('7-day sonnet', agentsUsageData.seven_day_sonnet);
-    if (agentsUsageData.seven_day_opus) addBlock('7-day opus', agentsUsageData.seven_day_opus);
+    for (const entry of agentEntries) {
+      const d = entry.data;
+      if (!d) continue;
+      // Always show machine name header with device color
+      const dc = getDeviceColor(entry.hostname);
+      const nameColor = dc ? dc.text : '#4ec9b0';
+      const borderColor = dc ? dc.border : 'rgba(78,201,176,0.2)';
+      blocks += `<div style="font-size:11px;color:${nameColor};margin:${blocks ? '10px' : '0'} 0 4px;font-weight:600;border-bottom:1px solid ${borderColor};padding-bottom:3px;">${entry.hostname}</div>`;
+      addBlock('5-hour window', d.five_hour);
+      addBlock('7-day window', d.seven_day);
+      addBlock('7-day sonnet', d.seven_day_sonnet);
+      if (d.seven_day_opus) addBlock('7-day opus', d.seven_day_opus);
+    }
 
     // "Last updated" indicator + error state
     if (agentsUsageLastUpdated) {
