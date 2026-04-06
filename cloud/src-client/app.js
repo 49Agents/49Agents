@@ -1724,23 +1724,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
     const agentEntries = Object.values(agentsUsageByAgent);
 
-    // Header: show worst (highest) 5-hour usage across all accounts
-    let worstPct = null;
-    for (const entry of agentEntries) {
-      if (entry.data && entry.data.five_hour) {
-        const p = entry.data.five_hour.utilization;
-        if (worstPct === null || p > worstPct) worstPct = p;
-      }
-    }
-    if (worstPct !== null) {
-      const cls = agentsUsageColorClass(worstPct);
-      if (pctEl) {
-        pctEl.textContent = (agentEntries.length > 1 ? 'max ' : '') + worstPct + '%';
-        pctEl.className = 'agents-hud-pct ' + cls;
-      }
-    } else if (pctEl) {
-      pctEl.textContent = '';
-    }
+    if (pctEl) pctEl.textContent = '';
 
     // Collapsed: no content
     if (!agentsHudExpanded) {
