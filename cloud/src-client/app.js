@@ -3966,6 +3966,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     try {
       const devices = getDevicesFromAgents();
 
+      if (devices.length === 0) {
+        if (onFallback) onFallback();
+        return;
+      }
+
       if (devices.length === 1) {
         onDeviceSelected(devices[0]);
         return;
