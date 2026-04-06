@@ -24,7 +24,6 @@
 </h1>
 <img width="100%" alt="Before — terminal clutter" src="https://github.com/user-attachments/assets/b06c8fe8-d1bf-432a-b935-bbf8376bd7ff" />
 <h1 align="center">
-  More 49
 </h1>
 <img width="1544" height="832" alt="diagram_with_pane_titles" src="https://github.com/user-attachments/assets/52a68a3a-8d77-4612-bbb0-dbc43ca990dd" />
 
