@@ -126,6 +126,18 @@ export function setupCloudCallbackRoutes(app) {
     res.redirect('/login');
   });
 
+  // GET /api/auth/telemetry-consent — get current telemetry preference
+  app.get('/api/auth/telemetry-consent', (req, res) => {
+    const localAuth = getLocalAuth();
+    if (!localAuth) {
+      return res.json({ consent: false, status: 'not_authenticated' });
+    }
+    res.json({
+      consent: localAuth.telemetryConsent === 1,
+      status: localAuth.telemetryConsent === -1 ? 'pending' : (localAuth.telemetryConsent === 1 ? 'accepted' : 'declined'),
+    });
+  });
+
   // POST /api/auth/telemetry-consent — set telemetry preference
   app.post('/api/auth/telemetry-consent', (req, res) => {
     try {

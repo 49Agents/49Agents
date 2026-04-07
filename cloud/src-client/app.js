@@ -2717,6 +2717,18 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         </label>
       </div>
 
+      <div id="settings-telemetry-row" style="display:none;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div>
+          <div style="font-size:13px;">Usage Telemetry</div>
+          <div style="font-size:11px;color:#6a6a8a;">Send anonymous usage data to improve 49Agents</div>
+        </div>
+        <label style="position:relative;display:inline-block;width:40px;height:22px;cursor:pointer;">
+          <input type="checkbox" id="settings-telemetry-toggle" style="opacity:0;width:0;height:0;">
+          <span style="position:absolute;inset:0;background:rgba(255,255,255,0.1);border-radius:11px;transition:0.2s;"></span>
+          <span style="position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:50%;transition:0.2s;"></span>
+        </label>
+      </div>
+
       <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
         <div>
           <div style="font-size:13px;">Snooze Duration</div>
@@ -2864,6 +2876,37 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       knob.style.left = hover ? '20px' : '2px';
       savePrefsToCloud({ focusMode: focusMode });
     });
+
+    // Telemetry toggle (local mode only)
+    fetch('/api/auth/mode').then(r => r.json()).then(mode => {
+      if (mode.mode !== 'local') return;
+      const row = document.getElementById('settings-telemetry-row');
+      if (!row) return;
+      row.style.display = 'flex';
+      const toggle = document.getElementById('settings-telemetry-toggle');
+      const track = toggle.nextElementSibling;
+      const knob = track.nextElementSibling;
+      // Load current consent state
+      fetch('/api/auth/telemetry-consent', { credentials: 'include' })
+        .then(r => r.json())
+        .then(data => {
+          toggle.checked = data.consent;
+          track.style.background = data.consent ? 'rgba(var(--accent-rgb),0.5)' : 'rgba(255,255,255,0.1)';
+          knob.style.left = data.consent ? '20px' : '2px';
+        }).catch(() => {});
+      // Handle toggle changes
+      toggle.addEventListener('change', () => {
+        const on = toggle.checked;
+        track.style.background = on ? 'rgba(var(--accent-rgb),0.5)' : 'rgba(255,255,255,0.1)';
+        knob.style.left = on ? '20px' : '2px';
+        fetch('/api/auth/telemetry-consent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ consent: on }),
+          credentials: 'include',
+        }).catch(() => {});
+      });
+    }).catch(() => {});
 
     // Snooze duration — custom dropdown
     const snoozeSlot = document.getElementById('settings-snooze-slot');
