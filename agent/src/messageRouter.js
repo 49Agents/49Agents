@@ -102,14 +102,14 @@ export function createMessageRouter(sendToRelay, options = {}) {
       const alreadyWired = wiredTerminals.has(terminalId);
       const emitter = await terminalManager.attachTerminal(terminalId, cols, rows);
 
-      // Always wire error handler to prevent crash on ttyd failures
-      emitter.on('error', (message) => {
-        console.error(`[Terminal] Error for ${terminalId.slice(0,8)}:`, message);
-        sendToRelay(MSG.TERMINAL_ERROR, { terminalId, message });
-      });
-
       if (!alreadyWired) {
         wiredTerminals.add(terminalId);
+
+        // Wire error handler once to prevent crash on ttyd failures
+        emitter.on('error', (message) => {
+          console.error(`[Terminal] Error for ${terminalId.slice(0,8)}:`, message);
+          sendToRelay(MSG.TERMINAL_ERROR, { terminalId, message });
+        });
 
         emitter.on('output', (base64Data) => {
           // Buffer output while history capture is in-flight

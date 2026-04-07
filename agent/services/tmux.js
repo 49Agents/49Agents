@@ -42,6 +42,20 @@ const terminals = new Map();
 const locationCache = new Map();
 const LOCATION_CACHE_TTL = 30000; // 30 seconds
 
+// Evict stale cache entries every 5 minutes to prevent unbounded growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of SESSION_ID_CACHE) {
+    if (now - entry.resolvedAt > SESSION_ID_TTL) SESSION_ID_CACHE.delete(key);
+  }
+  for (const [key, entry] of SESSION_NAME_CACHE) {
+    if (now - (entry.readAt || 0) > SESSION_ID_TTL) SESSION_NAME_CACHE.delete(key);
+  }
+  for (const [key, entry] of locationCache) {
+    if (now - entry.timestamp > LOCATION_CACHE_TTL) locationCache.delete(key);
+  }
+}, 300000).unref();
+
 /**
  * Resolve Claude session ID for a given PID by scanning debug log files.
  * Debug files are named <session-id>.txt and contain references to the PID
