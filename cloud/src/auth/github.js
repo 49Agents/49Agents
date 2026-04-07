@@ -122,14 +122,22 @@ export function setupGitHubAuth(app) {
 
     const state = nanoid();
 
-    // Store state in a short-lived cookie for CSRF verification
-    res.cookie('oauth_state', state, {
+    const cookieOpts = {
       httpOnly: true,
       secure: config.nodeEnv === 'production',
       sameSite: 'lax',
       maxAge: 10 * 60 * 1000, // 10 minutes
       path: '/',
-    });
+    };
+
+    // Store state in a short-lived cookie for CSRF verification
+    res.cookie('oauth_state', state, cookieOpts);
+
+    // Preserve ?next= parameter through the OAuth flow (used by local instance auth)
+    const next = req.query.next;
+    if (next) {
+      res.cookie('oauth_next', next, cookieOpts);
+    }
 
     const url = gh.createAuthorizationURL(state, ['read:user', 'user:email']);
     res.redirect(url.toString());
@@ -243,6 +251,16 @@ export function setupGitHubAuth(app) {
 
       // Set cookies
       setAuthCookies(res, jwtAccess, jwtRefresh);
+
+      // Check for a ?next= redirect (e.g., from local instance auth flow)
+      const nextUrl = req.cookies?.oauth_next;
+      if (nextUrl) {
+        res.clearCookie('oauth_next', { path: '/' });
+        // Only allow relative redirects (prevent open redirect)
+        if (nextUrl.startsWith('/')) {
+          return res.redirect(nextUrl);
+        }
+      }
 
       // Redirect to the main app
       res.redirect('/');

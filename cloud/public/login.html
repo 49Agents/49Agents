@@ -324,33 +324,84 @@
     }
   </style>
   <script>
-    // Show guest button only when OAuth is configured (production)
-    // If OAuth buttons are present (href not 503), show the guest option
     (function() {
-      const ghBtn = document.querySelector('a[href="/auth/github"]');
-      const googleBtn = document.querySelector('a[href="/auth/google"]');
-      if (ghBtn || googleBtn) {
-        const guestBtn = document.getElementById('guest-btn');
-        if (guestBtn) guestBtn.style.display = 'inline-flex';
+      // Pass ?next= parameter through to OAuth links (used by local instance auth flow)
+      var params = new URLSearchParams(location.search);
+      var next = params.get('next');
+      if (next) {
+        var ghBtn = document.querySelector('a[href="/auth/github"]');
+        var googleBtn = document.querySelector('a[href="/auth/google"]');
+        if (ghBtn) ghBtn.href += '?next=' + encodeURIComponent(next);
+        if (googleBtn) googleBtn.href += '?next=' + encodeURIComponent(next);
       }
-      document.getElementById('guest-btn')?.addEventListener('click', async () => {
-        const btn = document.getElementById('guest-btn');
+
+      // Detect local vs cloud mode and adjust UI accordingly
+      fetch('/api/auth/mode').then(function(r) { return r.json(); }).then(function(data) {
+        if (data.mode === 'local') {
+          // Local mode: hide OAuth + guest buttons, show "Sign in with 49Agents Cloud"
+          var ghBtn = document.querySelector('a[href^="/auth/github"]');
+          var googleBtn = document.querySelector('a[href^="/auth/google"]');
+          var guestBtn = document.getElementById('guest-btn');
+          var dividers = document.querySelectorAll('.divider');
+
+          if (ghBtn) ghBtn.style.display = 'none';
+          if (googleBtn) googleBtn.style.display = 'none';
+          if (guestBtn) guestBtn.style.display = 'none';
+          dividers.forEach(function(d) { d.style.display = 'none'; });
+
+          // Insert the cloud sign-in button
+          var card = document.querySelector('.login-card');
+          var footerText = document.querySelector('.footer-text');
+
+          var cloudBtn = document.createElement('a');
+          cloudBtn.href = '/auth/cloud-login';
+          cloudBtn.className = 'oauth-btn';
+          cloudBtn.innerHTML =
+            '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>' +
+            '</svg>' +
+            'Sign in with 49Agents Cloud';
+          card.insertBefore(cloudBtn, footerText);
+
+          footerText.textContent = 'Authenticate via 49agents.com';
+        } else {
+          // Cloud mode: show guest button if OAuth is configured
+          var ghBtn = document.querySelector('a[href^="/auth/github"]');
+          var googleBtn = document.querySelector('a[href^="/auth/google"]');
+          if (ghBtn || googleBtn) {
+            var guestBtn = document.getElementById('guest-btn');
+            if (guestBtn) guestBtn.style.display = 'inline-flex';
+          }
+        }
+      }).catch(function() {
+        // If /api/auth/mode fails, fall back to cloud mode behavior
+        var ghBtn = document.querySelector('a[href="/auth/github"]');
+        var googleBtn = document.querySelector('a[href="/auth/google"]');
+        if (ghBtn || googleBtn) {
+          var guestBtn = document.getElementById('guest-btn');
+          if (guestBtn) guestBtn.style.display = 'inline-flex';
+        }
+      });
+
+      // Guest button handler
+      document.getElementById('guest-btn')?.addEventListener('click', async function() {
+        var btn = document.getElementById('guest-btn');
         btn.disabled = true;
         btn.textContent = 'Starting...';
         try {
-          const res = await fetch('/auth/guest', { method: 'POST', credentials: 'include' });
+          var res = await fetch('/auth/guest', { method: 'POST', credentials: 'include' });
           if (res.ok) {
             window.location.href = '/';
           } else {
-            const data = await res.json().catch(() => ({}));
-            btn.textContent = data.error || 'Failed — try again';
+            var data = await res.json().catch(function() { return {}; });
+            btn.textContent = data.error || 'Failed -- try again';
             btn.disabled = false;
-            setTimeout(() => { btn.textContent = 'Continue as Guest'; }, 3000);
+            setTimeout(function() { btn.textContent = 'Continue as Guest'; }, 3000);
           }
         } catch (e) {
           btn.textContent = 'Network error';
           btn.disabled = false;
-          setTimeout(() => { btn.textContent = 'Continue as Guest'; }, 3000);
+          setTimeout(function() { btn.textContent = 'Continue as Guest'; }, 3000);
         }
       });
     })();
