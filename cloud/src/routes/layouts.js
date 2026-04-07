@@ -44,8 +44,13 @@ export function setupLayoutRoutes(app) {
 
   // PUT /api/layouts/:paneId — upsert a single pane layout
   app.put('/api/layouts/:paneId', requireAuth, (req, res) => {
-    upsertPaneLayout(req.user.id, { id: req.params.paneId, ...req.body });
-    res.json({ ok: true });
+    try {
+      upsertPaneLayout(req.user.id, { id: req.params.paneId, ...req.body });
+      res.json({ ok: true });
+    } catch (e) {
+      console.error(`[layouts] PUT /api/layouts/${req.params.paneId} failed:`, e.message);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // DELETE /api/layouts/:paneId — remove a pane from cloud layout

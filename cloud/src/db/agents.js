@@ -73,6 +73,21 @@ export function updateAgentDisplayName(agentId, displayName) {
 }
 
 /**
+ * Ensure an agent exists in the DB (creates if missing).
+ * Needed for dev mode where agents bypass the registration flow.
+ */
+export function ensureAgentExists(agentId, userId, hostname, os) {
+  const db = getDb();
+  const existing = db.prepare('SELECT id FROM agents WHERE id = ?').get(agentId);
+  if (!existing) {
+    db.prepare(`
+      INSERT INTO agents (id, user_id, hostname, os, token_hash)
+      VALUES (?, ?, ?, ?, 'dev')
+    `).run(agentId, userId, hostname, os || null);
+  }
+}
+
+/**
  * Delete an agent by ID.
  */
 export function deleteAgent(agentId) {
