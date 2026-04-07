@@ -2036,7 +2036,9 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
       // Update paneData.workingDir from live tmux cwd
       if (paneData && info && info.cwd) {
+        const cwdChanged = paneData.workingDir !== info.cwd;
         paneData.workingDir = info.cwd;
+        if (cwdChanged) renderConnectionLines();
       }
       // Update Claude session ID/name and persist to cloud when they change
       if (paneData && info && info.claudeSessionId) {
@@ -3821,6 +3823,9 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     if (lastReceivedClaudeStates) {
       updateClaudeStates(lastReceivedClaudeStates);
     }
+
+    // Draw connection lines after all panes are loaded
+    renderConnectionLines();
   }
 
   /**
@@ -4972,6 +4977,8 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       // Remove from cloud layout
       cloudDeleteLayout(paneId);
 
+      renderConnectionLines();
+
     } catch (e) {
       console.error('[App] Error deleting pane:', e);
     }
@@ -6036,6 +6043,9 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         ${paneNameHtml(paneData)}
         <div class="pane-header-right">
           ${shortcutBadgeHtml(paneData)}
+          <button class="folder-toolbar-btn follow-pin-btn" data-tooltip="${paneData._pinned ? 'Unpin (follow terminal)' : 'Pin path (stop following)'}" style="color:${paneData._pinned ? '#e8a060' : 'rgba(255,255,255,0.4)'};">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="${paneData._pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><path d="M12 2C9.24 2 7 4.24 7 7c0 1.38.56 2.63 1.46 3.54L12 22l3.54-11.46A5 5 0 0 0 17 7c0-2.76-2.24-5-5-5z"/><circle cx="12" cy="7" r="1.5" fill="${paneData._pinned ? '#1a1a2e' : 'none'}"/></svg>
+          </button>
           <button class="folder-toolbar-btn folder-new-file-btn" data-tooltip="New File">
             <svg viewBox="0 0 24 24" width="14" height="14"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" fill="none" stroke="currentColor" stroke-width="2"/><line x1="12" y1="11" x2="12" y2="17" stroke="currentColor" stroke-width="2"/><line x1="9" y1="14" x2="15" y2="14" stroke="currentColor" stroke-width="2"/></svg>
           </button>
@@ -6304,6 +6314,17 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       } catch (e) {
         alert('Failed to open file: ' + e.message);
       }
+    }
+
+    // Toolbar: Pin/Unpin (follow mode)
+    const pinBtn = pane.querySelector('.follow-pin-btn');
+    if (pinBtn) {
+      pinBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        paneData._pinned = !paneData._pinned;
+        // Re-render to update button state
+        renderFolderPane(paneData);
+      });
     }
 
     // Toolbar: New File
@@ -7906,6 +7927,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       }
       focusPane(paneData);
       focusTerminalInput(paneData.id);
+      // Follow mode: only on click (not hover) to avoid path changes while passing through panes
+      if (paneData.type === 'terminal' && paneData.workingDir) {
+        if (followModeDebounce) clearTimeout(followModeDebounce);
+        followModeDebounce = setTimeout(() => triggerFollowMode(paneData), 200);
+      }
     }, true); // capture phase
 
     // Track touch start position for tap-vs-drag detection
@@ -8350,6 +8376,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       } else {
         cloudSaveLayout(paneData);
       }
+      renderConnectionLines();
 
       document.removeEventListener('mousemove', moveHandler);
       document.removeEventListener('touchmove', moveHandler);
@@ -8479,6 +8506,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
       // Save size to cloud (cloud-only, no agent write)
       cloudSaveLayout(paneData);
+      renderConnectionLines();
 
       document.removeEventListener('mousemove', moveHandler);
       document.removeEventListener('touchmove', moveHandler);
@@ -8520,6 +8548,52 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
       // Quick View: overlays stay on all panes (no interaction in this mode)
     }
+
+  }
+
+  // ── Follow Mode: folder/git-graph panes follow focused terminal ──
+  let followModeDebounce = null;
+
+  function triggerFollowMode(terminalPane) {
+    if (!terminalPane || terminalPane.type !== 'terminal') return;
+    const cwd = terminalPane.workingDir;
+    if (!cwd) return;
+
+    // Find unpinned folder panes (only follow if exactly 1)
+    const unpinnedFolders = state.panes.filter(p =>
+      p.type === 'folder' && !p._pinned && p.agentId === terminalPane.agentId
+    );
+    if (unpinnedFolders.length === 1) {
+      const fp = unpinnedFolders[0];
+      const normCwd = normPath(cwd);
+      if (normPath(fp.folderPath) !== normCwd) {
+        fp.folderPath = cwd;
+        renderFolderPane(fp);
+        cloudSaveLayout(fp);
+      }
+    }
+
+    // Find unpinned git-graph panes (only follow if exactly 1)
+    const unpinnedGitGraphs = state.panes.filter(p =>
+      p.type === 'git-graph' && !p._pinned && p.agentId === terminalPane.agentId
+    );
+    if (unpinnedGitGraphs.length === 1) {
+      const gg = unpinnedGitGraphs[0];
+      // Use the terminal's cwd — the agent's fetchGraphData will resolve git root
+      // We need to update the repoPath on the agent via PATCH, then re-render
+      if (normPath(gg.repoPath) !== normPath(cwd)) {
+        agentRequest('PATCH', `/api/git-graphs/${gg.id}`, { repoPath: cwd }, gg.agentId)
+          .then(() => {
+            gg.repoPath = cwd;
+            gg.repoName = cwd.split('/').pop();
+            renderGitGraphPane(gg);
+            cloudSaveLayout(gg);
+          })
+          .catch(() => {}); // silently fail if not a git repo
+      }
+    }
+
+    renderConnectionLines();
   }
 
   // Pan canvas to center a pane and focus it
@@ -8550,6 +8624,169 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   // Update canvas transform
   function updateCanvasTransform() {
     canvas.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+  }
+
+  // ============================================================================
+  // PANE CONNECTION LINES — SVG lines between related panes sharing a path
+  // ============================================================================
+
+  const CONNECTION_COLORS = [
+    { line: 'rgba(78,201,176,0.35)',  dot: 'rgba(78,201,176,0.6)' },   // teal
+    { line: 'rgba(200,130,240,0.35)', dot: 'rgba(200,130,240,0.6)' },   // purple
+    { line: 'rgba(240,180,80,0.35)',  dot: 'rgba(240,180,80,0.6)' },    // amber
+    { line: 'rgba(100,180,255,0.35)', dot: 'rgba(100,180,255,0.6)' },   // blue
+    { line: 'rgba(255,120,140,0.35)', dot: 'rgba(255,120,140,0.6)' },   // pink
+    { line: 'rgba(130,220,100,0.35)', dot: 'rgba(130,220,100,0.6)' },   // green
+    { line: 'rgba(255,160,100,0.35)', dot: 'rgba(255,160,100,0.6)' },   // orange
+    { line: 'rgba(160,200,255,0.35)', dot: 'rgba(160,200,255,0.6)' },   // ice
+  ];
+
+  function getConnectionColor(pathKey) {
+    let hash = 0;
+    for (let i = 0; i < pathKey.length; i++) {
+      hash = ((hash << 5) - hash + pathKey.charCodeAt(i)) | 0;
+    }
+    return CONNECTION_COLORS[Math.abs(hash) % CONNECTION_COLORS.length];
+  }
+
+  function getPaneGroupPath(pane) {
+    if (pane.type === 'terminal') return pane.workingDir || null;
+    if (pane.type === 'folder')  return pane.folderPath || null;
+    if (pane.type === 'git-graph') return pane.repoPath || null;
+    if (pane.type === 'file') {
+      const fp = pane.filePath;
+      if (!fp) return null;
+      const idx = fp.lastIndexOf('/');
+      return idx > 0 ? fp.slice(0, idx) : null;
+    }
+    return null;
+  }
+
+  // Normalize path: remove trailing slash, collapse //
+  function normPath(p) {
+    if (!p) return null;
+    return p.replace(/\/+$/, '').replace(/\/\/+/g, '/') || '/';
+  }
+
+  let connectionSvg = null;
+  let connectionRafId = null;
+
+  function ensureConnectionSvg() {
+    if (connectionSvg && connectionSvg.parentNode === canvas) return connectionSvg;
+    connectionSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    connectionSvg.id = 'pane-connections';
+    connectionSvg.style.cssText = 'position:absolute;top:0;left:0;width:10000px;height:10000px;pointer-events:none;z-index:0;overflow:visible;';
+    canvas.insertBefore(connectionSvg, canvas.firstChild);
+    return connectionSvg;
+  }
+
+  function renderConnectionLines() {
+    if (connectionRafId) return;
+    connectionRafId = requestAnimationFrame(() => {
+      connectionRafId = null;
+      _renderConnectionLines();
+    });
+  }
+
+  // Find the closest edge point between two panes and return connection anchors
+  function getEdgeAnchors(a, b) {
+    const aw = a.width || 0, ah = a.height || 0;
+    const bw = b.width || 0, bh = b.height || 0;
+    const acx = a.x + aw / 2, acy = a.y + ah / 2;
+    const bcx = b.x + bw / 2, bcy = b.y + bh / 2;
+    const dx = bcx - acx, dy = bcy - acy;
+    const absDx = Math.abs(dx), absDy = Math.abs(dy);
+
+    let ax1, ay1, bx1, by1, dir;
+
+    if (absDx > absDy) {
+      // Horizontal: connect left/right edges
+      dir = 'h';
+      if (dx > 0) {
+        ax1 = a.x + aw; ay1 = acy; // right edge of A
+        bx1 = b.x;      by1 = bcy; // left edge of B
+      } else {
+        ax1 = a.x;       ay1 = acy; // left edge of A
+        bx1 = b.x + bw;  by1 = bcy; // right edge of B
+      }
+    } else {
+      // Vertical: connect top/bottom edges
+      dir = 'v';
+      if (dy > 0) {
+        ax1 = acx; ay1 = a.y + ah; // bottom edge of A
+        bx1 = bcx; by1 = b.y;      // top edge of B
+      } else {
+        ax1 = acx; ay1 = a.y;      // top edge of A
+        bx1 = bcx; by1 = b.y + bh; // bottom edge of B
+      }
+    }
+
+    return { ax: ax1, ay: ay1, bx: bx1, by: by1, dir };
+  }
+
+  function _renderConnectionLines() {
+    const svg = ensureConnectionSvg();
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+    // Group panes by normalized path + agentId
+    const groups = new Map();
+    for (const pane of state.panes) {
+      const raw = getPaneGroupPath(pane);
+      const p = normPath(raw);
+      if (!p) continue;
+      const key = `${pane.agentId || ''}::${p}`;
+      if (!groups.has(key)) groups.set(key, { path: p, panes: [] });
+      groups.get(key).panes.push(pane);
+    }
+
+    for (const [, group] of groups) {
+      if (group.panes.length < 2) continue;
+      const color = getConnectionColor(group.path);
+      const panes = group.panes;
+
+      for (let i = 0; i < panes.length; i++) {
+        for (let j = i + 1; j < panes.length; j++) {
+          const { ax, ay, bx, by, dir } = getEdgeAnchors(panes[i], panes[j]);
+
+          // Cubic bezier control points — offset along the connection direction
+          const dist = Math.hypot(bx - ax, by - ay);
+          const offset = Math.min(dist * 0.4, 120);
+          let c1x, c1y, c2x, c2y;
+          if (dir === 'h') {
+            const sign = bx > ax ? 1 : -1;
+            c1x = ax + offset * sign; c1y = ay;
+            c2x = bx - offset * sign; c2y = by;
+          } else {
+            const sign = by > ay ? 1 : -1;
+            c1x = ax; c1y = ay + offset * sign;
+            c2x = bx; c2y = by - offset * sign;
+          }
+
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', `M${ax},${ay} C${c1x},${c1y} ${c2x},${c2y} ${bx},${by}`);
+          path.setAttribute('stroke', color.line);
+          path.setAttribute('stroke-width', '2');
+          path.setAttribute('fill', 'none');
+          path.setAttribute('stroke-dasharray', '6 4');
+          svg.appendChild(path);
+
+          // Dots at edge anchor points
+          const dotA = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          dotA.setAttribute('cx', ax);
+          dotA.setAttribute('cy', ay);
+          dotA.setAttribute('r', '3');
+          dotA.setAttribute('fill', color.dot);
+          svg.appendChild(dotA);
+
+          const dotB = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          dotB.setAttribute('cx', bx);
+          dotB.setAttribute('cy', by);
+          dotB.setAttribute('r', '3');
+          dotB.setAttribute('fill', color.dot);
+          svg.appendChild(dotB);
+        }
+      }
+    }
   }
 
   // Quick View: overlay showing pane type, device, path, claude state

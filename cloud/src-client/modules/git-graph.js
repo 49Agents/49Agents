@@ -49,6 +49,9 @@ export function renderGitGraphPane(paneData) {
       ${_ctx.paneNameHtml(paneData)}
       <div class="pane-header-right">
         ${_ctx.shortcutBadgeHtml(paneData)}
+        <button class="folder-toolbar-btn follow-pin-btn" data-tooltip="${paneData._pinned ? 'Unpin (follow terminal)' : 'Pin path (stop following)'}" style="color:${paneData._pinned ? '#e8a060' : 'rgba(255,255,255,0.4)'};">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="${paneData._pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><path d="M12 2C9.24 2 7 4.24 7 7c0 1.38.56 2.63 1.46 3.54L12 22l3.54-11.46A5 5 0 0 0 17 7c0-2.76-2.24-5-5-5z"/><circle cx="12" cy="7" r="1.5" fill="${paneData._pinned ? '#1a1a2e' : 'none'}"/></svg>
+        </button>
         <div class="pane-zoom-controls">
           <button class="pane-zoom-btn zoom-out" data-tooltip="Zoom out">\u2212</button>
           <button class="pane-zoom-btn zoom-in" data-tooltip="Zoom in">+</button>
@@ -82,6 +85,16 @@ function setupGitGraphListeners(paneEl, paneData) {
   const graphOutput = paneEl.querySelector('.git-graph-output');
   const pushBtn = paneEl.querySelector('.git-graph-push-btn');
   const modeBtn = paneEl.querySelector('.git-graph-mode-btn');
+
+  // Pin/Unpin (follow mode)
+  const pinBtn = paneEl.querySelector('.follow-pin-btn');
+  if (pinBtn) {
+    pinBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      paneData._pinned = !paneData._pinned;
+      renderGitGraphPane(paneData);
+    });
+  }
 
   if (!paneData.graphMode) paneData.graphMode = 'svg';
 
