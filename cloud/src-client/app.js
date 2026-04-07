@@ -562,6 +562,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       clearTimeout(cloudLayoutTimers.get(paneId));
       cloudLayoutTimers.delete(paneId);
     }
+    cloudLayoutPending.delete(paneId);
     cloudFetch('DELETE', `/api/layouts/${paneId}`)
       .catch(e => console.error('[Cloud] Layout delete failed:', e.message));
   }
