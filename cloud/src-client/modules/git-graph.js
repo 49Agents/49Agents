@@ -607,7 +607,44 @@ export async function fetchGitGraphData(paneEl, paneData) {
     const statusEl = paneEl.querySelector('.git-graph-status');
 
     if (data.error) {
-      outputEl.innerHTML = `<span class="git-graph-error">Error: ${data.error}</span>`;
+      const isNotRepo = /not a git repository|not.*work.tree/i.test(data.error);
+      if (isNotRepo) {
+        const shortPath = (data.repoPath || paneData.repoPath || '').replace(/^\/home\/[^/]+/, '~');
+        branchEl.textContent = '';
+        statusEl.textContent = '';
+        // Safe DOM construction for non-repo state
+        outputEl.textContent = '';
+        const wrap = document.createElement('div');
+        wrap.className = 'git-graph-no-repo';
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        icon.setAttribute('viewBox', '0 0 24 24');
+        icon.setAttribute('width', '32');
+        icon.setAttribute('height', '32');
+        icon.setAttribute('fill', 'none');
+        icon.setAttribute('stroke', 'rgba(255,255,255,0.15)');
+        icon.setAttribute('stroke-width', '1.5');
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', '12'); circle.setAttribute('cy', '12'); circle.setAttribute('r', '10');
+        const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path1.setAttribute('d', 'M12 8v4');
+        const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path2.setAttribute('d', 'M12 16h.01');
+        icon.append(circle, path1, path2);
+        const label = document.createElement('div');
+        label.className = 'git-graph-no-repo-label';
+        label.textContent = 'Not a git repository';
+        const pathEl = document.createElement('div');
+        pathEl.className = 'git-graph-no-repo-path';
+        pathEl.textContent = shortPath;
+        wrap.append(icon, label, pathEl);
+        outputEl.appendChild(wrap);
+      } else {
+        const errEl = document.createElement('span');
+        errEl.className = 'git-graph-error';
+        errEl.textContent = data.error;
+        outputEl.textContent = '';
+        outputEl.appendChild(errEl);
+      }
       return;
     }
 

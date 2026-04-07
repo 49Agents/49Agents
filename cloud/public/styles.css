@@ -3972,6 +3972,25 @@ body.minimap-hidden #controls {
   padding: 8px 10px;
   display: block;
 }
+.git-graph-no-repo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 8px;
+  opacity: 0.5;
+}
+.git-graph-no-repo-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.4);
+}
+.git-graph-no-repo-path {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: rgba(255,255,255,0.25);
+}
 
 /* SVG graph scroll container */
 .gg-scroll-container {
