@@ -16,7 +16,7 @@
 
 import { WebSocket } from 'ws';
 import { verifyAgentToken } from '../auth/agentAuth.js';
-import { updateLastSeen, getAgentById } from '../db/agents.js';
+import { updateLastSeen, getAgentById, ensureAgentExists } from '../db/agents.js';
 import { checkAgentLimit } from '../billing/enforcement.js';
 import { recordEvent } from '../db/events.js';
 import { isVersionOutdated } from '../utils/version.js';
@@ -88,7 +88,8 @@ export function handleAgentConnection(ws, userAgents, userBrowsers, latestAgentV
             }
             // Normalize OS name: Node's process.platform reports 'darwin' but UI expects 'macos'
             const agentOs = msg.payload.os === 'darwin' ? 'macos' : (msg.payload.os || 'unknown');
-            // Look up created_at from DB for chronological ordering
+            // Ensure agent exists in DB (dev mode skips registration)
+            ensureAgentExists(agentId, userId, msg.payload.hostname || 'unknown', agentOs);
             const agentRecord = getAgentById(agentId);
             const createdAt = agentRecord?.created_at || new Date().toISOString();
             userAgents.get(userId).set(agentId, {

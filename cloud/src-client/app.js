@@ -379,41 +379,71 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
   // Cloud layout persistence (debounced per-pane, 500ms)
   const cloudLayoutTimers = new Map();
+  // Track panes with pending saves so we can flush on page unload
+  const cloudLayoutPending = new Map(); // paneId -> pane ref
+
+  function buildLayoutPayload(pane) {
+    const metadata = {};
+    if (pane.zoomLevel && pane.zoomLevel !== 100) metadata.zoomLevel = pane.zoomLevel;
+    if (pane.textOnly) metadata.textOnly = true;
+    if (pane.type === 'folder' && pane.folderPath) metadata.folderPath = pane.folderPath;
+    if (pane.beadsTag) metadata.beadsTag = pane.beadsTag;
+    if (pane.device) metadata.device = pane.device;
+    if (pane.filePath) metadata.filePath = pane.filePath;
+    if (pane.fileName) metadata.fileName = pane.fileName;
+    if (pane.url) metadata.url = pane.url;
+    if (pane.repoPath) metadata.repoPath = pane.repoPath;
+    if (pane.repoName) metadata.repoName = pane.repoName;
+    if (pane.graphMode && pane.graphMode !== 'svg') metadata.graphMode = pane.graphMode;
+    if (pane.projectPath) metadata.projectPath = pane.projectPath;
+    if (pane.dirPath) metadata.dirPath = pane.dirPath;
+    if (pane.claudeSessionId) metadata.claudeSessionId = pane.claudeSessionId;
+    if (pane.claudeSessionName) metadata.claudeSessionName = pane.claudeSessionName;
+    if (pane.workingDir) metadata.workingDir = pane.workingDir;
+    if (pane.shortcutNumber) metadata.shortcutNumber = pane.shortcutNumber;
+    if (pane.paneName) metadata.paneName = pane.paneName;
+    return {
+      paneType: pane.type,
+      positionX: pane.x,
+      positionY: pane.y,
+      width: pane.width,
+      height: pane.height,
+      zIndex: pane.zIndex || 0,
+      agentId: pane.agentId || activeAgentId,
+      metadata: Object.keys(metadata).length > 0 ? metadata : null
+    };
+  }
+
   function cloudSaveLayout(pane) {
     if (cloudLayoutTimers.has(pane.id)) clearTimeout(cloudLayoutTimers.get(pane.id));
+    cloudLayoutPending.set(pane.id, pane);
     cloudLayoutTimers.set(pane.id, setTimeout(() => {
       cloudLayoutTimers.delete(pane.id);
-      const metadata = {};
-      if (pane.zoomLevel && pane.zoomLevel !== 100) metadata.zoomLevel = pane.zoomLevel;
-      if (pane.textOnly) metadata.textOnly = true;
-      if (pane.type === 'folder' && pane.folderPath) metadata.folderPath = pane.folderPath;
-      if (pane.beadsTag) metadata.beadsTag = pane.beadsTag;
-      if (pane.device) metadata.device = pane.device;
-      if (pane.filePath) metadata.filePath = pane.filePath;
-      if (pane.fileName) metadata.fileName = pane.fileName;
-      if (pane.url) metadata.url = pane.url;
-      if (pane.repoPath) metadata.repoPath = pane.repoPath;
-      if (pane.repoName) metadata.repoName = pane.repoName;
-      if (pane.graphMode && pane.graphMode !== 'svg') metadata.graphMode = pane.graphMode;
-      if (pane.projectPath) metadata.projectPath = pane.projectPath;
-      if (pane.dirPath) metadata.dirPath = pane.dirPath;
-      if (pane.claudeSessionId) metadata.claudeSessionId = pane.claudeSessionId;
-      if (pane.claudeSessionName) metadata.claudeSessionName = pane.claudeSessionName;
-      if (pane.workingDir) metadata.workingDir = pane.workingDir;
-      if (pane.shortcutNumber) metadata.shortcutNumber = pane.shortcutNumber;
-      if (pane.paneName) metadata.paneName = pane.paneName;
-      cloudFetch('PUT', `/api/layouts/${pane.id}`, {
-        paneType: pane.type,
-        positionX: pane.x,
-        positionY: pane.y,
-        width: pane.width,
-        height: pane.height,
-        zIndex: pane.zIndex || 0,
-        agentId: pane.agentId || activeAgentId,
-        metadata: Object.keys(metadata).length > 0 ? metadata : null
-      }).catch(e => console.error('[Cloud] Layout save failed:', e.message));
+      cloudLayoutPending.delete(pane.id);
+      cloudFetch('PUT', `/api/layouts/${pane.id}`, buildLayoutPayload(pane))
+        .catch(e => console.error('[Cloud] Layout save failed:', e.message));
     }, 500));
   }
+
+  // Flush any pending layout saves on page unload using keepalive fetch
+  // so positions are never lost when the user refreshes mid-debounce
+  window.addEventListener('beforeunload', () => {
+    for (const [paneId, pane] of cloudLayoutPending) {
+      if (cloudLayoutTimers.has(paneId)) {
+        clearTimeout(cloudLayoutTimers.get(paneId));
+        cloudLayoutTimers.delete(paneId);
+      }
+      const payload = buildLayoutPayload(pane);
+      fetch(`/api/layouts/${paneId}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true
+      }).catch(() => {});
+    }
+    cloudLayoutPending.clear();
+  });
 
   // Save a recent pane context to cloud (fire-and-forget)
   function saveRecentContext(paneType, context, label, agentId) {
@@ -538,9 +568,12 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
   // Cloud view state (debounced 1s)
   let cloudViewStateTimer = null;
+  let cloudViewStateDirty = false;
   function cloudSaveViewState() {
+    cloudViewStateDirty = true;
     if (cloudViewStateTimer) clearTimeout(cloudViewStateTimer);
     cloudViewStateTimer = setTimeout(() => {
+      cloudViewStateDirty = false;
       cloudFetch('PUT', '/api/view-state', {
         zoom: state.zoom,
         panX: state.panX,
@@ -548,6 +581,20 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       }).catch(e => console.error('[Cloud] View state save failed:', e.message));
     }, 1000);
   }
+
+  // Also flush view state on page unload
+  window.addEventListener('beforeunload', () => {
+    if (cloudViewStateDirty) {
+      if (cloudViewStateTimer) clearTimeout(cloudViewStateTimer);
+      fetch('/api/view-state', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zoom: state.zoom, panX: state.panX, panY: state.panY }),
+        keepalive: true
+      }).catch(() => {});
+    }
+  });
 
   // Cloud note sync (debounced per-note, 500ms)
   const cloudNoteTimers = new Map();
@@ -8889,11 +8936,13 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
           <div class="mention-path">${escapeHtml(info.path)}</div>
           ${beadsInfo}
         </div>`;
-        overlay.addEventListener('click', (e) => {
+        overlay.addEventListener('mousedown', (e) => {
           e.stopPropagation();
+          e.preventDefault();
+          const encoded = btoa(unescape(encodeURIComponent(mentionPayload.text)));
           sendWs('terminal:input', {
             terminalId: paneData.id,
-            data: btoa(mentionPayload.text)
+            data: encoded
           }, paneData.agentId);
           // Auto-set beads tag when mentioning a beads issue to a terminal
           if (mentionPayload.type === 'beads' && mentionPayload.issueId) {
