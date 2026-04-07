@@ -255,10 +255,12 @@ export function setupGitHubAuth(app) {
 
       // Check for a ?next= redirect (e.g., from local instance auth flow)
       const nextUrl = req.cookies?.oauth_next;
+      console.log('[auth] oauth_next cookie:', nextUrl || '(none)');
       if (nextUrl) {
         res.clearCookie('oauth_next', { path: '/' });
         // Only allow relative redirects (prevent open redirect)
         if (nextUrl.startsWith('/')) {
+          console.log('[auth] Redirecting to next:', nextUrl);
           return res.redirect(nextUrl);
         }
       }

@@ -347,11 +347,16 @@
           var googleBtn = document.querySelector('a[href^="/auth/google"]');
           var guestBtn = document.getElementById('guest-btn');
 
+          // Build the next URL — after OAuth callback, redirect to /auth/local-grant
+          // which generates a code and sends the user back to localhost.
+          // The next value is stored in a cookie (not URL), so encode redirect_uri only.
+          var nextPath = '/auth/local-grant?redirect_uri=' + encodeURIComponent(redirectUri);
+
           if (ghBtn) {
-            ghBtn.href = cloudUrl + '/auth/github?next=' + encodeURIComponent('/auth/local-grant?redirect_uri=' + encodeURIComponent(redirectUri));
+            ghBtn.href = cloudUrl + '/auth/github?next=' + encodeURIComponent(nextPath);
           }
           if (googleBtn) {
-            googleBtn.href = cloudUrl + '/auth/google?next=' + encodeURIComponent('/auth/local-grant?redirect_uri=' + encodeURIComponent(redirectUri));
+            googleBtn.href = cloudUrl + '/auth/google?next=' + encodeURIComponent(nextPath);
           }
           // Show guest button — guest mode starts a temp session, later forces real sign-in
           if (guestBtn) guestBtn.style.display = 'inline-flex';
