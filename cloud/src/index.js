@@ -204,13 +204,6 @@ app.get('/pair', requireAuth, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Catch-all: redirect unmatched routes to /login
-// ---------------------------------------------------------------------------
-app.get('*', (req, res) => {
-  res.redirect('/login');
-});
-
-// ---------------------------------------------------------------------------
 // Initialize database and start server with WebSocket relay
 // ---------------------------------------------------------------------------
 async function start() {
@@ -259,6 +252,12 @@ async function start() {
       console.error('[cloud] Failed to load extensions:', err.message);
     }
   }
+
+  // Catch-all: redirect unmatched routes to /login
+  // Must be registered AFTER extensions so their routes take priority
+  app.get('*', (req, res) => {
+    res.redirect('/login');
+  });
 
   server.listen(config.port, config.host, () => {
     console.log(`[cloud] 49Agents Cloud Server`);
