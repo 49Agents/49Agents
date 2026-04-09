@@ -15,6 +15,7 @@ import { WebSocket } from 'ws';
 import { check as enforcementCheck, getTierInfo } from '../billing/enforcement.js';
 import { recordEvent } from '../db/events.js';
 import { isVersionOutdated } from '../utils/version.js';
+import { getUndismissedNotifications } from '../db/notifications.js';
 
 // Batch relay message counts — flush to DB every 60 seconds
 const relayCounters = new Map(); // userId -> count
@@ -59,6 +60,12 @@ export function handleBrowserConnection(ws, userId, userAgents, userBrowsers, la
   // Send tier info on connect
   const tierInfo = getTierInfo(userId);
   ws.send(JSON.stringify({ type: 'tier:info', payload: tierInfo }));
+
+  // Send any pending notifications
+  const pendingNotifs = getUndismissedNotifications(userId);
+  if (pendingNotifs.length > 0) {
+    ws.send(JSON.stringify({ type: 'notifications:pending', payload: pendingNotifs }));
+  }
 
   // Send cached claude:states for each online agent so browser doesn't wait for next poll
   for (const agent of agents) {

@@ -2,6 +2,7 @@ import { jwtVerify } from 'jose';
 import { issueAccessToken, getSecretKey } from './github.js';
 import { getUserById } from '../db/users.js';
 import { upsertUser } from '../db/users.js';
+import { getLocalAuth } from './localAuth.js';
 import { config } from '../config.js';
 
 const hasOAuth = !!(config.github.clientId || config.google.clientId);
@@ -30,17 +31,54 @@ export function requireAuth(req, res, next) {
 }
 
 async function handleAuth(req, res, next) {
-  // Dev/local mode: no OAuth configured AND not production — auto-authenticate as dev user
+  // Dev/local mode: no OAuth configured AND not production
   if (devModeEnabled) {
-    const devUser = upsertUser({
-      githubId: 'dev-0',
-      githubLogin: 'dev-user',
-      email: 'dev@localhost',
-      displayName: 'Dev User',
-      avatarUrl: null,
-    });
-    req.user = devUser;
-    return next();
+    // Escape hatch for contributors running without internet
+    if (process.env.SKIP_CLOUD_AUTH) {
+      const devUser = upsertUser({
+        githubId: 'dev-0',
+        githubLogin: 'dev-user',
+        email: 'dev@localhost',
+        displayName: 'Dev User',
+        avatarUrl: null,
+      });
+      req.user = devUser;
+      return next();
+    }
+
+    // Local mode: try cloud-authenticated identity first, then fall through
+    // to JWT cookie check (supports guest sessions and cloud-callback auth)
+    const localAuth = getLocalAuth();
+    if (localAuth) {
+      const user = getUserById(localAuth.cloudUserId) || upsertUser({
+        githubLogin: localAuth.githubLogin,
+        email: localAuth.email,
+        displayName: localAuth.displayName || 'Local User',
+        avatarUrl: localAuth.avatarUrl,
+      });
+      req.user = user;
+      return next();
+    }
+    // Fall through to JWT cookie check below (guest mode, etc.)
+  }
+
+  // Check for Bearer token (local instance tokens proxying requests to cloud)
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.slice(7);
+      const secretKey = getSecretKey();
+      const { payload } = await jwtVerify(token, secretKey);
+      if (payload.type === 'local_instance' && payload.sub) {
+        const user = getUserById(payload.sub);
+        if (user) {
+          req.user = user;
+          return next();
+        }
+      }
+    } catch {
+      // Bearer token invalid — fall through to cookie check
+    }
   }
 
   const accessToken = req.cookies?.tc_access;

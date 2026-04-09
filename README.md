@@ -2,7 +2,7 @@
   <img alt="49Agents" src="https://github.com/user-attachments/assets/4ee43d8f-75de-4305-98ca-09b4a96e1e5f" height="120" />
 </p>
 
-<h1 align="center">49Agents</h1>
+<h1 align="center">49 Agents IDE</h1>
 
 <p align="center">The first 2D agentic IDE. Open source.</p>
 
@@ -14,17 +14,23 @@
   <a href="https://twitter.com/49agents"><img src="https://img.shields.io/twitter/follow/49agents" alt="Twitter Follow" /></a>
 </p>
 
-<h3 align="center">Before:</h3>
+<h1 align="center">
+  Before
+</h1>
 
-<img width="100%" alt="Before — terminal clutter" src="https://github.com/user-attachments/assets/d611bbc2-16ee-4a18-baed-3a1cbf2a7306" />
+<img width="100%" alt="After — 49Agents" src="https://github.com/user-attachments/assets/878b3926-e017-4ccc-9c54-315b647fd417" />
+<h1 align="center">
+  49
+</h1>
+<img width="100%" alt="Before — terminal clutter" src="https://github.com/user-attachments/assets/b06c8fe8-d1bf-432a-b935-bbf8376bd7ff" />
+<h1 align="center">
+</h1>
+<img width="1544" height="832" alt="diagram_with_pane_titles" src="https://github.com/user-attachments/assets/52a68a3a-8d77-4612-bbb0-dbc43ca990dd" />
 
-<h3 align="center">After:</h3>
-
-<img width="100%" alt="After — 49Agents" src="https://github.com/user-attachments/assets/07ebd445-2eb7-4ee4-b18a-49abf9549c0d" />
 
 ---
 
-| Before | With 49Agents |
+| Before | 49 |
 |--------|--------------|
 | 14 terminal tabs | One zoomable canvas |
 | SSH into each machine | All machines, zero SSH |
@@ -49,9 +55,9 @@ cd 49Agents
 
 Open `http://localhost:1071`. No account, no login, no token.
 
-Don't want to self-host? **[49agents.com](https://49agents.com)**
+Don't want to self-host? **[49agents.com](https://app.49agents.com)**
+![tutorial](https://github.com/user-attachments/assets/776a96c7-35ae-495a-8c15-ee847b3dcd57)
 
-<img width="100%" alt="49Agents tutorial" src="https://github.com/user-attachments/assets/418d37c3-d52e-4de7-9726-28844527eca2" />
 
 ---
 
@@ -93,36 +99,36 @@ Don't want to self-host? **[49agents.com](https://49agents.com)**
 ## Architecture
 
 ```
-┌────────────┐      WSS      ┌────────────┐      WSS      ┌────────────┐
-│  PC        │ ────────────► │  Relay     │ ◄──────────── │  Browser   │
-│  49-agent  │               │            │               │            │
-└────────────┘               └────────────┘               └────────────┘
-                             Self-host or use
-                              49agents.com
+┌──────────────┐    WSS    ┌──────────────┐    WSS    ┌──────────────┐
+│  🖥️ PC       │ ────────►│  ☁️ Relay    │ ◄──────── │  📱 Browser  │
+│  49-agent    │           │              │           │              │
+└──────────────┘           └──────────────┘           └──────────────┘
+                           Self-host or use
+                            49agents.com
 ```
 
 <details>
 <summary>Multi-machine setup</summary>
 
 ```
-┌────────────┐                                           ┌────────────┐
-│  MacBook   │ ─── WSS ───┐                         ┌─── │  Phone     │
-│  49-agent  │             │                         │    │  Browser   │
-└────────────┘             │                         │    └────────────┘
-                           │     ┌──────────────┐    │
-┌────────────┐             ├────►│  Relay       │◄───┤    ┌────────────┐
-│  PC        │ ─── WSS ───┤     │              │    ├─── │  Laptop    │
-│  49-agent  │             │     │  Self-host   │    │    │  Browser   │
-└────────────┘             │     │  or use      │    │    └────────────┘
-                           │     │ 49agents.com │    │
-┌────────────┐             │     └──────────────┘    │    ┌────────────┐
-│  Azure VM  │ ─── WSS ───┘                         └─── │  Tablet    │
-│  49-agent  │                                            │  Browser   │
-└────────────┘                                            └────────────┘
+┌──────────────┐                                         ┌──────────────┐
+│  🖥️ MacBook  │ ─── WSS ───┐                        ┌───│  📱 Phone   │
+│  49-agent    │             │                       │   │  Browser     │
+└──────────────┘             │                       │   └──────────────┘
+                             │   ┌──────────────┐    │
+┌──────────────┐             ├──►│  ☁️ Relay    │◄───┤   ┌──────────────┐
+│  🖥️ PC       │ ─── WSS ───┤   │              │     ├───│  💻 Laptop  │
+│  49-agent    │             │   │  Self-host   │    │   │  Browser     │
+└──────────────┘             │   │  or use      │    │   └──────────────┘
+                             │   │ 49agents.com │    │
+┌──────────────┐             │   └──────────────┘    │    ┌──────────────┐
+│  ☁️ Azure VM │ ─── WSS ───┘                        └───│  📱 Tablet   │
+│  49-agent    │                                          │  Browser     │
+└──────────────┘                                          └──────────────┘
 
-                Each agent independently connects
-                 to the relay via WebSocket.
-                No terminal data stored server-side.
+                  Each agent independently connects
+                   to the relay via WebSocket.
+                  No terminal data stored server-side.
 ```
 
 </details>

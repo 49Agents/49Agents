@@ -15,6 +15,7 @@ import { jwtVerify } from 'jose';
 import { getSecretKey } from '../auth/github.js';
 import { getUserById } from '../db/users.js';
 import { upsertUser } from '../db/users.js';
+import { getLocalAuth } from '../auth/localAuth.js';
 import { handleBrowserConnection } from './browserHandler.js';
 import { handleAgentConnection } from './agentHandler.js';
 import { config } from '../config.js';
@@ -111,19 +112,37 @@ export function setupWebSocketRelay(server, options = {}) {
       try {
         let userId;
 
-        // Dev mode: always use the dev user — skip cookie auth entirely so
-        // stale cookies from previous sessions don't cause a userId mismatch
-        // with the agent (which also resolves to the same dev user).
-        // Only enabled when no OAuth is configured AND not in production.
-        if (!config.github.clientId && config.nodeEnv !== 'production') {
-          const devUser = upsertUser({
-            githubId: 'dev-0',
-            githubLogin: 'dev-user',
-            email: 'dev@localhost',
-            displayName: 'Dev User',
-            avatarUrl: null,
-          });
-          userId = devUser.id;
+        // Dev/local mode: no OAuth configured AND not production
+        if (!config.github.clientId && !config.google.clientId && config.nodeEnv !== 'production') {
+          if (process.env.SKIP_CLOUD_AUTH) {
+            // Escape hatch: use dev user
+            const devUser = upsertUser({
+              githubId: 'dev-0',
+              githubLogin: 'dev-user',
+              email: 'dev@localhost',
+              displayName: 'Dev User',
+              avatarUrl: null,
+            });
+            userId = devUser.id;
+          } else {
+            // Local mode: try cloud auth first, then JWT cookies (guest sessions)
+            const localAuth = getLocalAuth();
+            if (localAuth) {
+              const user = getUserById(localAuth.cloudUserId);
+              if (user) {
+                userId = user.id;
+              }
+            }
+            // Fall through to JWT cookie auth if no cloud auth (supports guest mode)
+            if (!userId) {
+              userId = await authenticateBrowserUpgrade(request);
+            }
+            if (!userId) {
+              socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+              socket.destroy();
+              return;
+            }
+          }
         } else {
           userId = await authenticateBrowserUpgrade(request);
         }

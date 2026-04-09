@@ -92,11 +92,12 @@ function clearAuthCookies(res) {
  * Register GitHub OAuth routes on the Express app.
  */
 export function setupGitHubAuth(app) {
-  // POST /auth/guest — create a guest session (only when OAuth is enabled)
+  // POST /auth/guest — create a guest session (when OAuth is enabled or in local mode)
   app.post('/auth/guest', async (req, res) => {
     const hasOAuth = !!(config.github.clientId || config.google.clientId);
-    if (!hasOAuth) {
-      return res.status(400).json({ error: 'Guest mode not available (no OAuth configured)' });
+    const isLocal = !hasOAuth && config.nodeEnv !== 'production';
+    if (!hasOAuth && !isLocal) {
+      return res.status(400).json({ error: 'Guest mode not available' });
     }
 
     try {
@@ -122,14 +123,22 @@ export function setupGitHubAuth(app) {
 
     const state = nanoid();
 
-    // Store state in a short-lived cookie for CSRF verification
-    res.cookie('oauth_state', state, {
+    const cookieOpts = {
       httpOnly: true,
       secure: config.nodeEnv === 'production',
       sameSite: 'lax',
       maxAge: 10 * 60 * 1000, // 10 minutes
       path: '/',
-    });
+    };
+
+    // Store state in a short-lived cookie for CSRF verification
+    res.cookie('oauth_state', state, cookieOpts);
+
+    // Preserve ?next= parameter through the OAuth flow (used by local instance auth)
+    const next = req.query.next;
+    if (next) {
+      res.cookie('oauth_next', next, cookieOpts);
+    }
 
     const url = gh.createAuthorizationURL(state, ['read:user', 'user:email']);
     res.redirect(url.toString());
@@ -243,6 +252,18 @@ export function setupGitHubAuth(app) {
 
       // Set cookies
       setAuthCookies(res, jwtAccess, jwtRefresh);
+
+      // Check for a ?next= redirect (e.g., from local instance auth flow)
+      const nextUrl = req.cookies?.oauth_next;
+      console.log('[auth] oauth_next cookie:', nextUrl || '(none)');
+      if (nextUrl) {
+        res.clearCookie('oauth_next', { path: '/' });
+        // Only allow relative redirects (prevent open redirect)
+        if (nextUrl.startsWith('/')) {
+          console.log('[auth] Redirecting to next:', nextUrl);
+          return res.redirect(nextUrl);
+        }
+      }
 
       // Redirect to the main app
       res.redirect('/');

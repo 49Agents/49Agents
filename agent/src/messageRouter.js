@@ -6,6 +6,7 @@ import { noteService } from '../services/notes.js';
 import { gitGraphService } from '../services/gitGraph.js';
 import { iframeService } from '../services/iframes.js';
 import { beadsService } from '../services/beads.js';
+import { conversationsService } from '../services/conversations.js';
 import { folderPaneService } from '../services/folderPanes.js';
 import { getLocalMetrics } from '../services/metrics.js';
 import { performUpdate } from './updater.js';
@@ -23,6 +24,40 @@ let localHostname = 'localhost';
 try {
   localHostname = execSync('hostname', { encoding: 'utf-8' }).trim();
 } catch {}
+
+/**
+ * Get OAuth access token from env var, credentials file, or macOS Keychain.
+ * Returns the token string or null if unavailable.
+ */
+async function getOAuthToken() {
+  // 1. Environment variable (works everywhere, set by Claude Desktop or manually)
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    return process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  }
+
+  // 2. Credentials file (Linux/Windows)
+  const credPath = join(homedir(), '.claude', '.credentials.json');
+  try {
+    const creds = JSON.parse(readFileSync(credPath, 'utf-8'));
+    const token = creds.claudeAiOauth?.accessToken;
+    if (token) return token;
+  } catch {}
+
+  // 3. macOS Keychain fallback
+  if (process.platform === 'darwin') {
+    try {
+      const { stdout } = await execAsync(
+        'security find-generic-password -s "Claude Code-credentials" -w',
+        { timeout: 5000 }
+      );
+      const keychainData = JSON.parse(stdout.trim());
+      const token = keychainData.claudeAiOauth?.accessToken;
+      if (token) return token;
+    } catch {}
+  }
+
+  return null;
+}
 
 function expandHome(p) {
   if (p === '~' || p === '~/') return homedir();
@@ -101,14 +136,14 @@ export function createMessageRouter(sendToRelay, options = {}) {
       const alreadyWired = wiredTerminals.has(terminalId);
       const emitter = await terminalManager.attachTerminal(terminalId, cols, rows);
 
-      // Always wire error handler to prevent crash on ttyd failures
-      emitter.on('error', (message) => {
-        console.error(`[Terminal] Error for ${terminalId.slice(0,8)}:`, message);
-        sendToRelay(MSG.TERMINAL_ERROR, { terminalId, message });
-      });
-
       if (!alreadyWired) {
         wiredTerminals.add(terminalId);
+
+        // Wire error handler once to prevent crash on ttyd failures
+        emitter.on('error', (message) => {
+          console.error(`[Terminal] Error for ${terminalId.slice(0,8)}:`, message);
+          sendToRelay(MSG.TERMINAL_ERROR, { terminalId, message });
+        });
 
         emitter.on('output', (base64Data) => {
           // Buffer output while history capture is in-flight
@@ -386,6 +421,17 @@ export function createMessageRouter(sendToRelay, options = {}) {
           return respond(200, beadsPane);
         }
 
+        // === Conversations Panes ===
+        case 'GET /api/conversations-panes': {
+          const convosPanes = conversationsService.listConversationsPanes();
+          return respond(200, convosPanes);
+        }
+        case 'POST /api/conversations-panes': {
+          const { dirPath, position, size, device } = body;
+          const convosPane = conversationsService.createConversationsPane({ dirPath, position, size, device });
+          return respond(200, convosPane);
+        }
+
         // === Folder Panes ===
         case 'GET /api/folder-panes': {
           const folderPanes = folderPaneService.listFolderPanes();
@@ -435,21 +481,14 @@ export function createMessageRouter(sendToRelay, options = {}) {
         // === Usage (proxy to Anthropic API with caching) ===
         case 'GET /api/usage': {
           const now = Date.now();
-          if (usageCache && (now - usageCacheTime) < USAGE_CACHE_TTL) {
+          const force = query.force === 'true';
+          if (!force && usageCache && (now - usageCacheTime) < USAGE_CACHE_TTL) {
             return respond(200, usageCache);
           }
           try {
-            const credPath = join(homedir(), '.claude', '.credentials.json');
-            let creds;
-            try {
-              creds = JSON.parse(readFileSync(credPath, 'utf-8'));
-            } catch (readErr) {
-              console.warn(`[usage] Cannot read credentials at ${credPath}:`, readErr.code || readErr.message);
-              return respond(503, { error: `Cannot read credentials: ${readErr.code || readErr.message}` });
-            }
-            const token = creds.claudeAiOauth?.accessToken;
+            const token = await getOAuthToken();
             if (!token) {
-              console.warn('[usage] No claudeAiOauth.accessToken in credentials file');
+              console.warn('[usage] No OAuth token found (env, credentials file, or macOS Keychain)');
               return respond(503, { error: 'Claude credentials not available' });
             }
 
@@ -462,6 +501,10 @@ export function createMessageRouter(sendToRelay, options = {}) {
             if (!resp.ok) {
               const text = await resp.text();
               console.warn(`[usage] Anthropic API returned ${resp.status}:`, text.slice(0, 200));
+              // On rate limit, serve stale cache if available rather than failing
+              if (resp.status === 429 && usageCache) {
+                return respond(200, { ...usageCache, stale: true });
+              }
               return respond(resp.status, { error: text });
             }
             const data = await resp.json();
@@ -678,6 +721,58 @@ export function createMessageRouter(sendToRelay, options = {}) {
         }
         if (method === 'DELETE') {
           beadsService.deleteBeadsPane(id);
+          return respond(200, { success: true });
+        }
+      }
+
+      // Conversations pane routes: GET /api/conversations-panes/:id/data, PATCH/DELETE /api/conversations-panes/:id
+      const convosDataMatch = path.match(/^\/api\/conversations-panes\/([^/]+)\/data$/);
+      if (convosDataMatch && method === 'GET') {
+        const id = convosDataMatch[1];
+        const convosPane = conversationsService.getConversationsPane(id);
+        if (!convosPane) return respond(404, { error: 'Conversations pane not found' });
+        const depth = parseInt(query.depth) || 0;
+        const conversations = await conversationsService.scanConversations(convosPane.dirPath, Math.min(depth, 3));
+        return respond(200, { conversations, dirPath: convosPane.dirPath, depth, timestamp: Date.now() });
+      }
+
+      // GET /api/conversations-panes/:id/detail?sessionId=X
+      const convosDetailMatch = path.match(/^\/api\/conversations-panes\/([^/]+)\/detail$/);
+      if (convosDetailMatch && method === 'GET') {
+        const id = convosDetailMatch[1];
+        const convosPane = conversationsService.getConversationsPane(id);
+        if (!convosPane) return respond(404, { error: 'Conversations pane not found' });
+        const sessionId = query.sessionId;
+        if (!sessionId) return respond(400, { error: 'sessionId required' });
+        const detail = await conversationsService.fetchConversationDetail(convosPane.dirPath, sessionId);
+        return respond(200, detail);
+      }
+
+      // GET /api/conversations-panes/:id/extract?sessionId=X&format=Y
+      const convosExtractMatch = path.match(/^\/api\/conversations-panes\/([^/]+)\/extract$/);
+      if (convosExtractMatch && method === 'GET') {
+        const id = convosExtractMatch[1];
+        const convosPane = conversationsService.getConversationsPane(id);
+        if (!convosPane) return respond(404, { error: 'Conversations pane not found' });
+        const sessionId = query.sessionId;
+        const format = query.format || 'markdown';
+        if (!sessionId) return respond(400, { error: 'sessionId required' });
+        const result = await conversationsService.extractConversation(convosPane.dirPath, sessionId, format);
+        if (result.error) return respond(404, result);
+        return respond(200, result);
+      }
+
+      const convosPaneMatch = path.match(/^\/api\/conversations-panes\/([^/]+)$/);
+      if (convosPaneMatch) {
+        const id = convosPaneMatch[1];
+        if (method === 'PATCH') {
+          const updates = {};
+          if (body.dirPath !== undefined) updates.dirPath = body.dirPath;
+          conversationsService.updateConversationsPane(id, updates);
+          return respond(200, { success: true });
+        }
+        if (method === 'DELETE') {
+          conversationsService.deleteConversationsPane(id);
           return respond(200, { success: true });
         }
       }

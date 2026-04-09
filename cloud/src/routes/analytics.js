@@ -1,8 +1,11 @@
 import { recordPageView } from '../db/analytics.js';
+import { isLocalMode, getLocalAuth } from '../auth/localAuth.js';
+import { queueTelemetryEvent } from '../telemetry/localCollector.js';
 
 // Simple in-memory rate limit: track last request time per IP
 const lastRequestByIp = new Map();
 const RATE_LIMIT_MS = 1000;
+const clientEventRateByIp = new Map();
 
 // Clean up stale entries every 5 minutes
 setInterval(() => {
@@ -52,6 +55,37 @@ export function setupAnalyticsRoutes(app) {
       utmMedium: utmMedium ? String(utmMedium).slice(0, 100) : null,
       utmCampaign: utmCampaign ? String(utmCampaign).slice(0, 200) : null,
     });
+
+    res.json({ ok: true });
+  });
+
+  // POST /api/telemetry/client-events — receive client-side telemetry from local mode
+  app.post('/api/telemetry/client-events', (req, res) => {
+    if (!isLocalMode()) return res.status(404).json({ error: 'Not available' });
+
+    const localAuth = getLocalAuth();
+    if (!localAuth || localAuth.telemetryConsent !== 1) {
+      return res.json({ ok: false });
+    }
+
+    const ip = req.ip || 'unknown';
+    const now = Date.now();
+    const lastTime = clientEventRateByIp.get(ip);
+    if (lastTime && (now - lastTime) < RATE_LIMIT_MS) {
+      return res.status(429).json({ error: 'Too many requests' });
+    }
+    if (clientEventRateByIp.size > 50000) clientEventRateByIp.clear();
+    clientEventRateByIp.set(ip, now);
+
+    const { events } = req.body;
+    if (!Array.isArray(events)) {
+      return res.status(400).json({ error: 'events array is required' });
+    }
+
+    for (const evt of events.slice(0, 50)) {
+      if (!evt.event_type || typeof evt.event_type !== 'string') continue;
+      queueTelemetryEvent(evt.event_type, localAuth.cloudUserId, evt.data || null);
+    }
 
     res.json({ ok: true });
   });

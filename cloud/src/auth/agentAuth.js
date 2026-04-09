@@ -8,7 +8,8 @@
 
 import { jwtVerify, SignJWT } from 'jose';
 import { config } from '../config.js';
-import { upsertUser } from '../db/users.js';
+import { upsertUser, getUserById } from '../db/users.js';
+import { getLocalAuth } from './localAuth.js';
 
 const hasOAuth = !!(config.github.clientId || config.google.clientId);
 const isProduction = config.nodeEnv === 'production';
@@ -31,16 +32,35 @@ function encodeSecret(secret) {
 export async function verifyAgentToken(token) {
   // Dev mode: no OAuth configured AND not production — accept 'dev' token without verification
   if (devModeEnabled && token === 'dev') {
-    const devUser = upsertUser({
-      githubId: 'dev-0',
-      githubLogin: 'dev-user',
-      email: 'dev@localhost',
-      displayName: 'Dev User',
-      avatarUrl: null,
+    // Escape hatch: SKIP_CLOUD_AUTH preserves old dev-user behavior
+    if (process.env.SKIP_CLOUD_AUTH) {
+      const devUser = upsertUser({
+        githubId: 'dev-0',
+        githubLogin: 'dev-user',
+        email: 'dev@localhost',
+        displayName: 'Dev User',
+        avatarUrl: null,
+      });
+      return {
+        agentId: 'agent_dev_local',
+        userId: devUser.id,
+      };
+    }
+
+    // Local mode: use the cloud-authenticated identity
+    const localAuth = getLocalAuth();
+    if (!localAuth) {
+      throw new Error('Local instance not authenticated with cloud. Open the app in your browser to sign in first.');
+    }
+    const user = getUserById(localAuth.cloudUserId) || upsertUser({
+      githubLogin: localAuth.githubLogin,
+      email: localAuth.email,
+      displayName: localAuth.displayName || 'Local User',
+      avatarUrl: localAuth.avatarUrl,
     });
     return {
       agentId: 'agent_dev_local',
-      userId: devUser.id,
+      userId: user.id,
     };
   }
 

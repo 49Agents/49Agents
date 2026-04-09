@@ -180,6 +180,31 @@ export function initDatabase() {
     console.log('[db] Migration: Created recent_pane_contexts table');
   }
 
+  // Migration: notifications tables
+  try {
+    db.prepare('SELECT id FROM notifications LIMIT 1').get();
+  } catch (e) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id       TEXT REFERENCES users(id) ON DELETE CASCADE,
+        message       TEXT NOT NULL,
+        type          TEXT NOT NULL DEFAULT 'info' CHECK(type IN ('info', 'warning', 'error')),
+        created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+      CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at);
+
+      CREATE TABLE IF NOT EXISTS notification_dismissals (
+        notification_id INTEGER NOT NULL REFERENCES notifications(id) ON DELETE CASCADE,
+        user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        dismissed_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (notification_id, user_id)
+      );
+    `);
+    console.log('[db] Migration: Created notifications tables');
+  }
+
   console.log(`[db] SQLite database initialized at ${config.dbPath}`);
   return db;
 }

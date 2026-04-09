@@ -3,9 +3,9 @@ import { FitAddon } from './lib/addon-fit.mjs';
 import { WebLinksAddon } from './lib/addon-web-links.mjs';
 import { playDismissSound, playNotificationSound, setSoundEnabled as _setSoundEnabled } from './modules/sounds.js';
 import { escapeHtml, formatBytes, metricColorClass, formatLocationPath, isExternalInputFocused, truncateUrl, isAgentVersionOutdated, getTerminalFontFamily } from './modules/utils.js';
-import { PANE_DEFAULTS, PANE_ENDPOINT_MAP, ICON_BEADS, ICON_GIT_GRAPH, ICON_FOLDER, CLAUDE_STATE_SVGS, CLAUDE_LOGO_SVG, RESET_ICON_SVG, WIFI_OFF_SVG, DEVICE_COLORS, TERMINAL_FONTS, CANVAS_BACKGROUNDS, osIcon } from './modules/constants.js';
+import { APP_VERSION, PANE_DEFAULTS, PANE_ENDPOINT_MAP, ICON_BEADS, ICON_GIT_GRAPH, ICON_FOLDER, ICON_CONVERSATIONS, CLAUDE_STATE_SVGS, CLAUDE_LOGO_SVG, RESET_ICON_SVG, WIFI_OFF_SVG, DEVICE_COLORS, TERMINAL_FONTS, CANVAS_BACKGROUNDS, osIcon } from './modules/constants.js';
 import { initMinimap, startMinimapLoop, hideMinimap, renderMinimap, getCanvasBounds, calcPlacementPos, setMinimapEnabled, getMinimapEnabled } from './modules/minimap.js';
-import { initNotificationDeps, initNotifications, showToast, dismissToast, snoozeNotification, sendBrowserNotification, updateTabTitleBadge, handleStateTransition, previousClaudeStates, notifiedStates, activeToasts, snoozedNotifications, snoozeCount, getIsFirstClaudeStateUpdate, setIsFirstClaudeStateUpdate, getNotificationContainer } from './modules/notifications.js';
+import { initNotificationDeps, initNotifications, showPromoToasts, showToast, dismissToast, snoozeNotification, sendBrowserNotification, updateTabTitleBadge, handleStateTransition, previousClaudeStates, notifiedStates, activeToasts, snoozedNotifications, snoozeCount, getIsFirstClaudeStateUpdate, setIsFirstClaudeStateUpdate, getNotificationContainer, showAdminToast, dismissAdminToast } from './modules/notifications.js';
 import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modules/git-graph.js';
 
 // 49Agents - Mobile-first terminal pane management
@@ -31,7 +31,8 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     zoom: 1,
     panX: 0,
     panY: 0,
-    nextZIndex: 1
+    nextZIndex: 1,
+    projects: [],     // { id, name, color, x, y, width, height, shortcutNumber }
   };
 
   // File editors map (paneId -> { originalContent, hasChanges, fileHandle })
@@ -49,6 +50,10 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   // Folder panes map (paneId -> { refreshInterval })
   const folderPanes = new Map();
 
+  // Tab groups: panes sharing a tabGroupId appear as tabs in one window.
+  // Only the active tab's DOM element is visible; siblings are display:none.
+  let nextTabGroupId = 1;
+
   // Notification state — imported from modules/notifications.js
   // (previousClaudeStates, notifiedStates, activeToasts, snoozedNotifications, snoozeCount)
   // Sound state — imported from modules/sounds.js
@@ -58,6 +63,109 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   let focusMode = 'hover'; // 'hover' (default) or 'click' — how mouse selects panes
   let tabHeld = false; // Track Tab key state globally (used for Tab+scroll canvas pan, Tab+key chords)
   let tutorialsCompleted = {};
+  let projectsSidebarVisible = false; // Tab+P toggles projects sidebar
+  let projectsSidebarPosition = 'right'; // 'left' or 'right'
+  let teleportAnimation = true; // false = instant teleport
+
+  // ---------------------------------------------------------------------------
+  // Client-side telemetry tracker (local mode only, respects consent)
+  // ---------------------------------------------------------------------------
+  const _telemetry = {
+    _active: false,
+    _queue: [],
+    _sessionStart: Date.now(),
+    _activeMs: 0,
+    _lastVisible: Date.now(),
+    _terminalInputCount: 0,
+    _panePeakCounts: {},
+    _paneOpenTimes: {},
+
+    init() {
+      fetch('/api/auth/mode').then(r => r.json()).then(m => {
+        if (m.mode !== 'local') return;
+        return fetch('/api/auth/telemetry-consent', { credentials: 'include' }).then(r => r.json());
+      }).then(d => {
+        if (!d || !d.consent) return;
+        this._active = true;
+        this._setupVisibility();
+        this.track('session.start', {
+          screen_width: screen.width,
+          screen_height: screen.height,
+          viewport_width: window.innerWidth,
+          viewport_height: window.innerHeight,
+          is_mobile: /Mobi|Android/i.test(navigator.userAgent),
+        });
+        setInterval(() => this.flush(), 30000);
+      }).catch(() => {});
+    },
+
+    track(type, data) {
+      if (!this._active) return;
+      this._queue.push({
+        event_type: type,
+        data: data || {},
+        ts: new Date().toISOString(),
+        sid: sessionStorage.getItem('_49a_sid'),
+      });
+      if (this._queue.length >= 20) this.flush();
+    },
+
+    flush() {
+      if (!this._active || this._queue.length === 0) return;
+      const batch = this._queue.splice(0);
+      const body = JSON.stringify({ events: batch });
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('/api/telemetry/client-events', new Blob([body], { type: 'application/json' }));
+      } else {
+        fetch('/api/telemetry/client-events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+      }
+    },
+
+    _setupVisibility() {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+          this._activeMs += Date.now() - this._lastVisible;
+          this._trackSessionEnd();
+          this.flush();
+        } else {
+          this._lastVisible = Date.now();
+        }
+      });
+      window.addEventListener('beforeunload', () => {
+        this._trackSessionEnd();
+        this.flush();
+      });
+    },
+
+    _trackSessionEnd() {
+      const now = Date.now();
+      const totalActive = this._activeMs + (document.visibilityState === 'visible' ? now - this._lastVisible : 0);
+      this.track('session.end', {
+        duration_ms: now - this._sessionStart,
+        active_ms: totalActive,
+        idle_ms: (now - this._sessionStart) - totalActive,
+        pane_counts: this._panePeakCounts,
+        terminal_commands_sent: this._terminalInputCount,
+      });
+    },
+
+    trackPaneOpen(pane) {
+      const type = pane.type || 'terminal';
+      this.track('pane.open', { pane_type: type });
+      this._paneOpenTimes[pane.id] = Date.now();
+      const current = state.panes.filter(p => (p.type || 'terminal') === type).length;
+      this._panePeakCounts[type] = Math.max(this._panePeakCounts[type] || 0, current);
+    },
+
+    trackPaneClose(paneId, paneType) {
+      const openTime = this._paneOpenTimes[paneId];
+      this.track('pane.close', {
+        pane_type: paneType,
+        duration_ms: openTime ? Date.now() - openTime : null,
+      });
+      delete this._paneOpenTimes[paneId];
+    },
+  };
 
   // Expanded pane state
   let expandedPaneId = null;
@@ -87,7 +195,10 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
   // Shortcut number helpers (Tab+1..9 quick-jump)
   function getNextShortcutNumber() {
-    const used = new Set(state.panes.map(p => p.shortcutNumber).filter(Boolean));
+    const used = new Set([
+      ...state.panes.map(p => p.shortcutNumber).filter(Boolean),
+      ...state.projects.map(p => p.shortcutNumber).filter(Boolean),
+    ]);
     for (let n = 1; n <= 9; n++) {
       if (!used.has(n)) return n;
     }
@@ -126,22 +237,42 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   }
 
   function reassignShortcutNumber(paneData, newNum) {
-    // Swap if another pane has this number
-    const existing = state.panes.find(p => p.shortcutNumber === newNum && p.id !== paneData.id);
-    if (existing) {
-      existing.shortcutNumber = paneData.shortcutNumber || null;
-      updateShortcutBadge(existing);
-      cloudSaveLayout(existing);
+    // Swap if another pane or project has this number
+    const existingPane = state.panes.find(p => p.shortcutNumber === newNum && p.id !== paneData.id);
+    if (existingPane) {
+      existingPane.shortcutNumber = paneData.shortcutNumber || null;
+      updateShortcutBadge(existingPane);
+      cloudSaveLayout(existingPane);
+    }
+    const existingProject = state.projects.find(p => p.shortcutNumber === newNum && p.id !== paneData.id);
+    if (existingProject) {
+      existingProject.shortcutNumber = paneData.shortcutNumber || null;
+      saveProjectsToCloud();
+      renderProjectsSidebar();
     }
     paneData.shortcutNumber = newNum;
-    updateShortcutBadge(paneData);
-    cloudSaveLayout(paneData);
+    // Determine what type of thing this is and save accordingly
+    if (state.projects.includes(paneData)) {
+      saveProjectsToCloud();
+      renderProjectsSidebar();
+    } else {
+      updateShortcutBadge(paneData);
+      cloudSaveLayout(paneData);
+    }
   }
 
   function updateShortcutBadge(paneData) {
     const paneEl = document.getElementById(`pane-${paneData.id}`);
     if (!paneEl) return;
-    // Remove any existing badge or input
+
+    // Checkpoint pane badge
+    const ckptBadge = paneEl.querySelector('.checkpoint-pane-badge');
+    if (ckptBadge) {
+      ckptBadge.textContent = paneData.shortcutNumber ? `Tab+${paneData.shortcutNumber}` : 'Tab+?';
+      return;
+    }
+
+    // Regular pane badge
     paneEl.querySelectorAll('.pane-shortcut-badge').forEach(el => el.remove());
     if (paneData.shortcutNumber) {
       const headerRight = paneEl.querySelector('.pane-header-right');
@@ -161,7 +292,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     closeShortcutAssignPopup();
     const paneEl = document.getElementById(`pane-${paneData.id}`);
     if (!paneEl) return;
-    const badge = paneEl.querySelector('.pane-shortcut-badge');
+    const badge = paneEl.querySelector('.pane-shortcut-badge') || paneEl.querySelector('.checkpoint-pane-badge');
     if (!badge) return;
 
     const rect = badge.getBoundingClientRect();
@@ -396,11 +527,15 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       if (pane.repoName) metadata.repoName = pane.repoName;
       if (pane.graphMode && pane.graphMode !== 'svg') metadata.graphMode = pane.graphMode;
       if (pane.projectPath) metadata.projectPath = pane.projectPath;
+      if (pane.dirPath) metadata.dirPath = pane.dirPath;
       if (pane.claudeSessionId) metadata.claudeSessionId = pane.claudeSessionId;
       if (pane.claudeSessionName) metadata.claudeSessionName = pane.claudeSessionName;
       if (pane.workingDir) metadata.workingDir = pane.workingDir;
       if (pane.shortcutNumber) metadata.shortcutNumber = pane.shortcutNumber;
       if (pane.paneName) metadata.paneName = pane.paneName;
+      if (pane.checkpointName) metadata.checkpointName = pane.checkpointName;
+      if (pane.tabGroupId) metadata.tabGroupId = pane.tabGroupId;
+      if (pane.tabGroupActive) metadata.tabGroupActive = true;
       cloudFetch('PUT', `/api/layouts/${pane.id}`, {
         paneType: pane.type,
         positionX: pane.x,
@@ -1271,6 +1406,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       <div class="hud-header agents-hud-header">
         <span class="hud-title">Usage</span>
         <span class="agents-hud-pct" id="agents-hud-pct"></span>
+        <button id="agents-usage-refresh" title="Refresh usage" style="background:none;border:none;color:#6a6a8a;cursor:pointer;padding:0 2px;line-height:1;font-size:13px;margin-left:4px;opacity:0.7;transition:opacity 0.15s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7">&#x21bb;</button>
       </div>
       <div class="agents-hud-content"></div>
     `;
@@ -1287,6 +1423,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         }
       });
       renderAgentsHud();
+    });
+
+    hud.querySelector('#agents-usage-refresh').addEventListener('click', (e) => {
+      e.stopPropagation();
+      fetchAgentsUsage(true);
     });
 
     // Polling starts when first agent comes online (see updateAgentsHud)
@@ -1498,33 +1639,32 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     };
   }
 
-  async function fetchAgentsUsage() {
-    // Query all online agents in parallel — use first successful response
-    // (usage data is per-account, so any online agent returns the same data)
+  async function fetchAgentsUsage(force = false) {
+    // Query agents sequentially — stop at first success.
+    // (usage data is per-account, so any agent returns the same data; parallel
+    // requests against the same OAuth token trigger Anthropic rate limits)
     const onlineAgents = agents.filter(a => a.online);
     if (onlineAgents.length === 0) return;
-    try {
-      const results = await Promise.allSettled(
-        onlineAgents.map(a => agentRequest('GET', '/api/usage', null, a.agentId))
-      );
-      const first = results.find(r => r.status === 'fulfilled' && r.value);
-      if (first) {
-        agentsUsageData = first.value;
-        agentsUsageLastUpdated = Date.now();
-        agentsUsageFetchError = null;
-        renderAgentsHud();
-      } else {
-        // All agents failed — extract first error for display
-        const firstErr = results.find(r => r.status === 'rejected');
-        agentsUsageFetchError = firstErr ? (firstErr.reason?.message || 'Failed to fetch usage') : 'No response from agents';
-        console.warn('[usage] All agents failed to return usage data:', results.map(r => r.status === 'rejected' ? r.reason?.message : 'fulfilled-empty').join(', '));
-        renderAgentsHud();
+    const path = force ? '/api/usage?force=true' : '/api/usage';
+    let lastError = null;
+    for (const agent of onlineAgents) {
+      try {
+        const data = await agentRequest('GET', path, null, agent.agentId);
+        if (data) {
+          agentsUsageData = data;
+          if (!data.stale) agentsUsageLastUpdated = Date.now();
+          agentsUsageFetchError = null;
+          renderAgentsHud();
+          return;
+        }
+      } catch (e) {
+        lastError = e.message || 'Failed to fetch usage';
+        console.warn(`[usage] Agent ${agent.agentId.slice(0,8)} failed:`, e.message);
       }
-    } catch (e) {
-      agentsUsageFetchError = e.message || 'Unexpected error';
-      console.warn('[usage] fetchAgentsUsage error:', e);
-      renderAgentsHud();
     }
+    agentsUsageFetchError = lastError || 'No response from agents';
+    console.warn('[usage] All agents failed to return usage data');
+    renderAgentsHud();
   }
 
   function agentsUsageColorClass(pct) {
@@ -1603,10 +1743,12 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     if (agentsUsageLastUpdated) {
       const ago = Math.floor((Date.now() - agentsUsageLastUpdated) / 60000);
       const agoText = ago < 1 ? 'just now' : `${ago}m ago`;
-      const stale = ago >= 10;
-      const color = stale ? '#e85' : '#666';
+      const isStale = ago >= 10;
+      const color = isStale ? '#e85' : '#666';
       let updatedLine = `<div class="agents-last-updated" style="text-align:right;font-size:10px;color:${color};margin-top:4px;">Updated ${agoText}`;
-      if (agentsUsageFetchError && stale) {
+      if (agentsUsageData?.stale) {
+        updatedLine += ` <span style="color:#e85;" title="Anthropic rate limited — showing cached data">\u00b7 data may be outdated</span>`;
+      } else if (agentsUsageFetchError && isStale) {
         updatedLine += ` <span style="color:#e55;">\u00b7 update failed</span>`;
       }
       updatedLine += `</div>`;
@@ -1881,6 +2023,14 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       if (prefs.tutorialsCompleted) {
         tutorialsCompleted = prefs.tutorialsCompleted;
       }
+      if (prefs.projectsSidebarPosition) {
+        projectsSidebarPosition = prefs.projectsSidebarPosition;
+      }
+      if (prefs.teleportAnimation !== undefined) {
+        teleportAnimation = prefs.teleportAnimation;
+      }
+      // Load projects
+      loadProjectsFromPrefs(prefs);
     } catch (e) {
       console.error('[App] Preferences load failed:', e.message);
     }
@@ -1931,7 +2081,9 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     updateCanvasTransform();
     setupEventListeners();
     initNotifications();
+    showPromoToasts();
     connectWebSocket();
+    _telemetry.init();
     // loadTerminalsFromServer is called after agents:list arrives via WS
 
     const hudContainer = createHudContainer();
@@ -2468,6 +2620,16 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         showUpgradePrompt(payload.message);
         break;
 
+      case 'notification:new':
+        showAdminToast(payload);
+        break;
+
+      case 'notifications:pending':
+        if (Array.isArray(payload)) {
+          payload.forEach(n => showAdminToast(n));
+        }
+        break;
+
       case 'chat:message':
         if (window._chatHud) {
           const chatEl = document.getElementById('feedback-hud');
@@ -2575,6 +2737,8 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         hud_hidden: hudHidden,
       },
       tutorialsCompleted: tutorialsCompleted,
+      projectsSidebarPosition: projectsSidebarPosition,
+      teleportAnimation: teleportAnimation,
       ...overrides,
     };
   }
@@ -2623,6 +2787,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   }
 
   function showSettingsModal() {
+    _telemetry.track('feature.settings_open');
     const existing = document.getElementById('settings-modal');
     if (existing) { existing.remove(); return; }
 
@@ -2715,6 +2880,40 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         </label>
       </div>
 
+      <div id="settings-telemetry-row" style="display:none;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div>
+          <div style="font-size:13px;">Usage Telemetry</div>
+          <div style="font-size:11px;color:#6a6a8a;">Send anonymous usage data to improve 49Agents</div>
+        </div>
+        <label style="position:relative;display:inline-block;width:40px;height:22px;cursor:pointer;">
+          <input type="checkbox" id="settings-telemetry-toggle" style="opacity:0;width:0;height:0;">
+          <span style="position:absolute;inset:0;background:rgba(255,255,255,0.1);border-radius:11px;transition:0.2s;"></span>
+          <span style="position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:50%;transition:0.2s;"></span>
+        </label>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div>
+          <div style="font-size:13px;">Teleport Animation</div>
+          <div style="font-size:11px;color:#6a6a8a;">Animate when jumping to projects/checkpoints</div>
+        </div>
+        <label style="position:relative;display:inline-block;width:40px;height:22px;cursor:pointer;">
+          <input type="checkbox" id="settings-teleport-anim-toggle" ${teleportAnimation ? 'checked' : ''} style="opacity:0;width:0;height:0;">
+          <span style="position:absolute;inset:0;background:${teleportAnimation ? 'rgba(var(--accent-rgb),0.5)' : 'rgba(255,255,255,0.1)'};border-radius:11px;transition:0.2s;"></span>
+          <span style="position:absolute;top:2px;left:${teleportAnimation ? '20px' : '2px'};width:18px;height:18px;background:#fff;border-radius:50%;transition:0.2s;"></span>
+        </label>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div>
+          <div style="font-size:13px;">Projects Sidebar Position</div>
+          <div style="font-size:11px;color:#6a6a8a;">Where the sidebar appears (Tab+P)</div>
+        </div>
+        <div id="settings-sidebar-pos" style="display:flex;gap:4px;">
+          ${['left', 'right'].map(pos => `<button class="settings-sidebar-pos-btn" data-pos="${pos}" style="padding:4px 10px;border-radius:4px;border:1px solid ${projectsSidebarPosition === pos ? 'rgba(var(--accent-rgb),0.4)' : 'rgba(255,255,255,0.08)'};background:${projectsSidebarPosition === pos ? 'rgba(var(--accent-rgb),0.2)' : 'transparent'};color:${projectsSidebarPosition === pos ? '#fff' : '#8b8bb0'};font-size:11px;cursor:pointer;font-family:inherit;">${pos}</button>`).join('')}
+        </div>
+      </div>
+
       <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
         <div>
           <div style="font-size:13px;">Snooze Duration</div>
@@ -2793,6 +2992,10 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
           <kbd style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;font-family:inherit;color:#ccc;">Middle-drag</kbd><span style="color:#9999b8;">Pan canvas (anywhere)</span>
         </div>
       </div>
+
+      <div style="padding-top:14px;text-align:center;">
+        <span style="font-size:10px;color:#3a3a5a;letter-spacing:0.5px;">49agents v${APP_VERSION}</span>
+      </div>
     `;
 
     overlay.appendChild(dialog);
@@ -2862,6 +3065,65 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       knob.style.left = hover ? '20px' : '2px';
       savePrefsToCloud({ focusMode: focusMode });
     });
+
+    // Teleport animation toggle
+    const teleportAnimToggle = document.getElementById('settings-teleport-anim-toggle');
+    teleportAnimToggle.addEventListener('change', () => {
+      const on = teleportAnimToggle.checked;
+      teleportAnimation = on;
+      const track = teleportAnimToggle.nextElementSibling;
+      const knob = track.nextElementSibling;
+      track.style.background = on ? 'rgba(var(--accent-rgb),0.5)' : 'rgba(255,255,255,0.1)';
+      knob.style.left = on ? '20px' : '2px';
+      savePrefsToCloud({ teleportAnimation: on });
+    });
+
+    // Sidebar position buttons
+    document.querySelectorAll('.settings-sidebar-pos-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        projectsSidebarPosition = btn.dataset.pos;
+        // Update button styles
+        document.querySelectorAll('.settings-sidebar-pos-btn').forEach(b => {
+          const isSel = b.dataset.pos === projectsSidebarPosition;
+          b.style.borderColor = isSel ? 'rgba(var(--accent-rgb),0.4)' : 'rgba(255,255,255,0.08)';
+          b.style.background = isSel ? 'rgba(var(--accent-rgb),0.2)' : 'transparent';
+          b.style.color = isSel ? '#fff' : '#8b8bb0';
+        });
+        applyProjectsSidebarPosition();
+        savePrefsToCloud({ projectsSidebarPosition: projectsSidebarPosition });
+      });
+    });
+
+    // Telemetry toggle (local mode only)
+    fetch('/api/auth/mode').then(r => r.json()).then(mode => {
+      if (mode.mode !== 'local') return;
+      const row = document.getElementById('settings-telemetry-row');
+      if (!row) return;
+      row.style.display = 'flex';
+      const toggle = document.getElementById('settings-telemetry-toggle');
+      const track = toggle.nextElementSibling;
+      const knob = track.nextElementSibling;
+      // Load current consent state
+      fetch('/api/auth/telemetry-consent', { credentials: 'include' })
+        .then(r => r.json())
+        .then(data => {
+          toggle.checked = data.consent;
+          track.style.background = data.consent ? 'rgba(var(--accent-rgb),0.5)' : 'rgba(255,255,255,0.1)';
+          knob.style.left = data.consent ? '20px' : '2px';
+        }).catch(() => {});
+      // Handle toggle changes
+      toggle.addEventListener('change', () => {
+        const on = toggle.checked;
+        track.style.background = on ? 'rgba(var(--accent-rgb),0.5)' : 'rgba(255,255,255,0.1)';
+        knob.style.left = on ? '20px' : '2px';
+        fetch('/api/auth/telemetry-consent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ consent: on }),
+          credentials: 'include',
+        }).catch(() => {});
+      });
+    }).catch(() => {});
 
     // Snooze duration — custom dropdown
     const snoozeSlot = document.getElementById('settings-snooze-slot');
@@ -2933,6 +3195,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       if (!item) return;
       const themeKey = item.dataset.theme;
       applyTerminalTheme(themeKey);
+      _telemetry.track('feature.theme_change', { theme_name: themeKey });
       renderThemeList(themeSearch.value);
       // Update collapsed preview
       const t = TERMINAL_THEMES[themeKey];
@@ -3005,6 +3268,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   function sendWs(type, payload, agentId) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type, payload, agentId: agentId || activeAgentId }));
+      if (type === 'terminal:input') _telemetry._terminalInputCount++;
     }
   }
 
@@ -3532,6 +3796,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       case 'beads':
         titleHtml = `${deviceTag}<svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align: middle; margin-right: 4px;">${ICON_BEADS}</svg> Beads Issues`;
         break;
+      case 'conversations': {
+        const shortDir = (paneData.dirPath || '').replace(/^\/home\/[^/]+/, '~').replace(/^\/Users\/[^/]+/, '~');
+        titleHtml = `${deviceTag}<svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align: middle; margin-right: 4px;">${ICON_CONVERSATIONS}</svg> ${escapeHtml(shortDir)}`;
+        break;
+      }
       case 'git-graph':
         titleHtml = `${deviceTag}<svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align: middle; margin-right: 4px;">${ICON_GIT_GRAPH}</svg> ${escapeHtml(paneData.repoName || 'Git Graph')}`;
         break;
@@ -3610,6 +3879,10 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       defPos: { x: 100, y: 100 }, defSize: PANE_DEFAULTS['folder'],
       extraFields: (f) => ({ folderPath: f.folderPath, device: f.device || null }),
       render: renderFolderPane },
+    { type: 'conversations', endpoint: '/api/conversations-panes',
+      defPos: { x: 100, y: 100 }, defSize: PANE_DEFAULTS['conversations'],
+      extraFields: (c) => ({ dirPath: c.dirPath, device: c.device || null }),
+      render: renderConversationsPane },
   ];
 
   async function loadPanesFromAgent(agentId, cloudLayoutMap) {
@@ -3645,15 +3918,18 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
           if (cl.metadata.textOnly) pane.textOnly = cl.metadata.textOnly;
           if (cl.metadata.folderPath) pane.folderPath = cl.metadata.folderPath;
           if (cl.metadata.beadsTag) pane.beadsTag = cl.metadata.beadsTag;
+          if (cl.metadata.dirPath) pane.dirPath = cl.metadata.dirPath;
           if (cl.metadata.claudeSessionId) pane.claudeSessionId = cl.metadata.claudeSessionId;
           if (cl.metadata.claudeSessionName) pane.claudeSessionName = cl.metadata.claudeSessionName;
           if (cl.metadata.workingDir) pane.workingDir = cl.metadata.workingDir;
           if (cl.metadata.shortcutNumber) pane.shortcutNumber = cl.metadata.shortcutNumber;
           if (cl.metadata.paneName) pane.paneName = cl.metadata.paneName;
+          if (cl.metadata.tabGroupId) pane.tabGroupId = cl.metadata.tabGroupId;
+          if (cl.metadata.tabGroupActive) pane.tabGroupActive = true;
         }
         // Fill in device from agent hostname if the agent didn't return one
         if (!pane.device && agentHostname) pane.device = agentHostname;
-        state.panes.push(pane);
+        state.panes.push(pane); _telemetry.trackPaneOpen(pane);
         cfg.render(pane);
       }
     });
@@ -3721,14 +3997,24 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
             if (meta.repoName) pane.repoName = meta.repoName;
             if (meta.graphMode) pane.graphMode = meta.graphMode;
             if (meta.projectPath) pane.projectPath = meta.projectPath;
+            if (meta.dirPath) pane.dirPath = meta.dirPath;
             if (meta.beadsTag) pane.beadsTag = meta.beadsTag;
             if (meta.workingDir) pane.workingDir = meta.workingDir;
             if (meta.claudeSessionId) pane.claudeSessionId = meta.claudeSessionId;
             if (meta.claudeSessionName) pane.claudeSessionName = meta.claudeSessionName;
             if (meta.shortcutNumber) pane.shortcutNumber = meta.shortcutNumber;
             if (meta.paneName) pane.paneName = meta.paneName;
-            state.panes.push(pane);
-            renderOfflinePlaceholder(pane);
+            if (meta.checkpointName) pane.checkpointName = meta.checkpointName;
+            if (meta.tabGroupId) pane.tabGroupId = meta.tabGroupId;
+            if (meta.tabGroupActive) pane.tabGroupActive = true;
+            state.panes.push(pane); _telemetry.trackPaneOpen(pane);
+            // Checkpoint panes are client-only — render them directly, not as offline placeholders
+            if (pane.type === 'checkpoint') {
+              pane._offlinePlaceholder = false;
+              renderCheckpointPane(pane);
+            } else {
+              renderOfflinePlaceholder(pane);
+            }
           }
       }
 
@@ -3760,11 +4046,23 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       console.error('[App] Failed to load panes:', e);
     }
 
+    // Ensure nextTabGroupId is ahead of any restored groups
+    for (const p of state.panes) {
+      if (p.tabGroupId) {
+        const match = p.tabGroupId.match(/^tg-(\d+)$/);
+        if (match) nextTabGroupId = Math.max(nextTabGroupId, parseInt(match[1], 10) + 1);
+      }
+    }
+
     // Re-apply cached claude states now that panes are rendered
     // (states may have arrived before DOM elements existed)
     if (lastReceivedClaudeStates) {
       updateClaudeStates(lastReceivedClaudeStates);
     }
+
+    // Render project rectangles on canvas
+    renderProjectRectangles();
+    startProjectsSidebarRefresh();
   }
 
   /**
@@ -3953,6 +4251,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     try {
       const devices = getDevicesFromAgents();
 
+      if (devices.length === 0) {
+        if (onFallback) onFallback();
+        return;
+      }
+
       if (devices.length === 1) {
         onDeviceSelected(devices[0]);
         return;
@@ -4063,7 +4366,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         agentId: resolvedAgentId
       };
 
-      state.panes.push(pane);
+      state.panes.push(pane); _telemetry.trackPaneOpen(pane);
       renderPane(pane);
       cloudSaveLayout(pane);
       // attachTerminal is called from initTerminal after a 100ms setTimeout.
@@ -4470,7 +4773,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         agentId: resolvedAgentId
       };
 
-      state.panes.push(pane);
+      state.panes.push(pane); _telemetry.trackPaneOpen(pane);
       renderFilePane(pane);
       cloudSaveLayout(pane);
       saveRecentContext('file', pane.filePath, pane.fileName, resolvedAgentId);
@@ -4505,7 +4808,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         agentId: activeAgentId
       };
 
-      state.panes.push(pane);
+      state.panes.push(pane); _telemetry.trackPaneOpen(pane);
       renderNotePane(pane);
       cloudSaveLayout(pane);
 
@@ -4728,7 +5031,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         agentId: activeAgentId
       };
 
-      state.panes.push(pane);
+      state.panes.push(pane); _telemetry.trackPaneOpen(pane);
       renderIframePane(pane);
       cloudSaveLayout(pane);
       try { saveRecentContext('iframe', pane.url, new URL(pane.url).hostname); } catch (_) { saveRecentContext('iframe', pane.url, pane.url); }
@@ -4754,7 +5057,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         url: iframeData.url,
         agentId: activeAgentId
       };
-      state.panes.push(pane);
+      state.panes.push(pane); _telemetry.trackPaneOpen(pane);
       renderIframePane(pane);
       cloudSaveLayout(pane);
       try { saveRecentContext('iframe', pane.url, new URL(pane.url).hostname); } catch (_) { saveRecentContext('iframe', pane.url, pane.url); }
@@ -4788,7 +5091,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         agentId: resolvedAgentId
       };
 
-      state.panes.push(pane);
+      state.panes.push(pane); _telemetry.trackPaneOpen(pane);
       renderGitGraphPane(pane);
       cloudSaveLayout(pane);
       saveRecentContext('git-graph', pane.repoPath, pane.repoName, resolvedAgentId);
@@ -4818,6 +5121,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     try {
       const pane = state.panes.find(p => p.id === paneId);
       const paneType = pane?.type || 'terminal';
+      _telemetry.trackPaneClose(paneId, paneType);
 
       if (paneType === 'terminal') {
         // Close terminal via WebSocket
@@ -4891,6 +5195,10 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         if (fpInfo?.refreshInterval) clearInterval(fpInfo.refreshInterval);
         folderPanes.delete(paneId);
         agentRequest('DELETE', `/api/folder-panes/${paneId}`, null, pane?.agentId).catch(() => {});
+      } else if (paneType === 'conversations') {
+        agentRequest('DELETE', `/api/conversations-panes/${paneId}`, null, pane?.agentId).catch(() => {});
+      } else if (paneType === 'checkpoint') {
+        // Checkpoint panes are local-only, just remove from state
       }
 
       // Remove from state
@@ -4911,6 +5219,276 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
     } catch (e) {
       console.error('[App] Error deleting pane:', e);
+    }
+  }
+
+  // ============================================================================
+  // SECTION 12b: TAB GROUPS                                       [Tab grouping]
+  // Panes sharing a tabGroupId appear as tabs in a single window.
+  // Only the active tab is visible; siblings are hidden (display:none).
+  // ============================================================================
+
+  function getTabGroupPanes(tabGroupId) {
+    if (!tabGroupId) return [];
+    return state.panes.filter(p => p.tabGroupId === tabGroupId);
+  }
+
+  function getActiveTabPane(tabGroupId) {
+    return getTabGroupPanes(tabGroupId).find(p => p.tabGroupActive);
+  }
+
+  // Switch to a different tab within a group
+  function switchTab(targetPaneId) {
+    const targetPane = state.panes.find(p => p.id === targetPaneId);
+    if (!targetPane || !targetPane.tabGroupId) return;
+
+    const groupPanes = getTabGroupPanes(targetPane.tabGroupId);
+    const currentActive = groupPanes.find(p => p.tabGroupActive);
+
+    if (currentActive && currentActive.id === targetPaneId) return; // already active
+
+    // Sync geometry from current active to target before switching
+    if (currentActive) {
+      targetPane.x = currentActive.x;
+      targetPane.y = currentActive.y;
+      targetPane.width = currentActive.width;
+      targetPane.height = currentActive.height;
+      targetPane.zIndex = currentActive.zIndex;
+      currentActive.tabGroupActive = false;
+
+      const currentEl = document.getElementById(`pane-${currentActive.id}`);
+      if (currentEl) currentEl.style.display = 'none';
+    }
+
+    targetPane.tabGroupActive = true;
+    const targetEl = document.getElementById(`pane-${targetPaneId}`);
+    if (targetEl) {
+      targetEl.style.display = '';
+      targetEl.style.left = `${targetPane.x}px`;
+      targetEl.style.top = `${targetPane.y}px`;
+      targetEl.style.width = `${targetPane.width}px`;
+      targetEl.style.height = `${targetPane.height}px`;
+      targetEl.style.zIndex = targetPane.zIndex;
+    }
+
+    // Refit terminal after showing (dimensions may have changed while hidden)
+    const termInfo = terminals.get(targetPaneId);
+    if (termInfo) {
+      setTimeout(() => {
+        try {
+          if (termInfo.safeFitAndSync) termInfo.safeFitAndSync();
+          else termInfo.fitAddon.fit();
+        } catch (e) { /* ignore */ }
+      }, 50);
+    }
+
+    // Re-render tab bars for all panes in the group
+    refreshTabBars(targetPane.tabGroupId);
+    focusPane(targetPane);
+    focusTerminalInput(targetPaneId);
+
+    // Persist state
+    groupPanes.forEach(p => cloudSaveLayout(p));
+  }
+
+  // Sync position/size from the active tab to all hidden siblings
+  function syncTabGroupGeometry(paneData) {
+    if (!paneData.tabGroupId) return;
+    const siblings = getTabGroupPanes(paneData.tabGroupId);
+    for (const sib of siblings) {
+      if (sib.id === paneData.id) continue;
+      sib.x = paneData.x;
+      sib.y = paneData.y;
+      sib.width = paneData.width;
+      sib.height = paneData.height;
+      // Don't update DOM for hidden panes — it'll sync when switchTab shows them
+    }
+  }
+
+  // Create a new terminal tab in the same group as an existing pane
+  async function createTabInGroup(sourcePaneId) {
+    const sourcePane = state.panes.find(p => p.id === sourcePaneId);
+    if (!sourcePane || sourcePane.type !== 'terminal') return;
+
+    // If source pane has no group yet, assign one
+    if (!sourcePane.tabGroupId) {
+      sourcePane.tabGroupId = `tg-${nextTabGroupId++}`;
+      sourcePane.tabGroupActive = true;
+      cloudSaveLayout(sourcePane);
+    }
+
+    const groupId = sourcePane.tabGroupId;
+    const agentId = sourcePane.agentId || activeAgentId;
+
+    try {
+      const reqBody = {
+        workingDir: sourcePane.workingDir || '~',
+        position: { x: sourcePane.x, y: sourcePane.y },
+        size: { width: sourcePane.width, height: sourcePane.height }
+      };
+      if (sourcePane.device) reqBody.device = sourcePane.device;
+      const terminal = await agentRequest('POST', '/api/terminals', reqBody, agentId);
+
+      const pane = {
+        id: terminal.id,
+        type: 'terminal',
+        x: sourcePane.x,
+        y: sourcePane.y,
+        width: sourcePane.width,
+        height: sourcePane.height,
+        zIndex: sourcePane.zIndex,
+        tmuxSession: terminal.tmuxSession,
+        device: terminal.device || sourcePane.device || null,
+        agentId: agentId,
+        tabGroupId: groupId,
+        tabGroupActive: false, // will become active after switchTab
+      };
+
+      state.panes.push(pane);
+      _telemetry.trackPaneOpen(pane);
+      renderPane(pane);
+      cloudSaveLayout(pane);
+
+      // Hide immediately since it's not the active tab yet
+      const newEl = document.getElementById(`pane-${pane.id}`);
+      if (newEl) newEl.style.display = 'none';
+
+      // Wait for terminal init, then switch to the new tab
+      await new Promise(r => setTimeout(r, 200));
+      switchTab(pane.id);
+
+      // Refresh tab bars on the source pane too (it now has a tab bar)
+      refreshTabBars(groupId);
+
+    } catch (e) {
+      console.error('[App] Failed to create tab:', e);
+    }
+  }
+
+  // Re-render tab bars on all visible panes in a group
+  function refreshTabBars(tabGroupId) {
+    if (!tabGroupId) return;
+    const groupPanes = getTabGroupPanes(tabGroupId);
+    for (const p of groupPanes) {
+      const paneEl = document.getElementById(`pane-${p.id}`);
+      if (!paneEl) continue;
+      renderTabBar(paneEl, p);
+    }
+  }
+
+  // Render (or update) the tab bar inside a pane element
+  function renderTabBar(paneEl, paneData) {
+    // Remove existing tab bar if any
+    const existing = paneEl.querySelector('.tab-bar');
+    if (existing) existing.remove();
+
+    if (!paneData.tabGroupId) return;
+
+    const groupPanes = getTabGroupPanes(paneData.tabGroupId);
+    if (groupPanes.length < 2) return; // no bar needed for single-tab groups
+
+    const bar = document.createElement('div');
+    bar.className = 'tab-bar';
+
+    groupPanes.forEach((p, idx) => {
+      const tab = document.createElement('div');
+      tab.className = 'tab-bar-tab' + (p.tabGroupActive ? ' active' : '');
+      tab.dataset.paneId = p.id;
+
+      const label = document.createElement('span');
+      label.className = 'tab-bar-label';
+      label.textContent = p.paneName || `Terminal ${idx + 1}`;
+      tab.appendChild(label);
+
+      // Close button per tab
+      const closeBtn = document.createElement('span');
+      closeBtn.className = 'tab-bar-close';
+      closeBtn.innerHTML = '&times;';
+      closeBtn.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+      });
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeTabInGroup(p.id);
+      });
+      tab.appendChild(closeBtn);
+
+      // Click to switch tab
+      tab.addEventListener('mousedown', (e) => {
+        e.stopPropagation(); // don't start drag
+      });
+      tab.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!p.tabGroupActive) switchTab(p.id);
+      });
+
+      bar.appendChild(tab);
+    });
+
+    // Add "+" button at end of tab bar
+    const addBtn = document.createElement('div');
+    addBtn.className = 'tab-bar-add';
+    addBtn.textContent = '+';
+    addBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+    addBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      createTabInGroup(paneData.id);
+    });
+    bar.appendChild(addBtn);
+
+    // Insert after .pane-header
+    const header = paneEl.querySelector('.pane-header');
+    if (header) {
+      header.insertAdjacentElement('afterend', bar);
+    }
+  }
+
+  // Close a tab within a group
+  function closeTabInGroup(paneId) {
+    const pane = state.panes.find(p => p.id === paneId);
+    if (!pane || !pane.tabGroupId) {
+      deletePane(paneId);
+      return;
+    }
+
+    const groupId = pane.tabGroupId;
+    const groupPanes = getTabGroupPanes(groupId);
+
+    if (groupPanes.length <= 1) {
+      // Last tab in group — dissolve group and delete normally
+      pane.tabGroupId = null;
+      pane.tabGroupActive = false;
+      deletePane(paneId);
+      return;
+    }
+
+    const wasActive = pane.tabGroupActive;
+
+    // If closing the active tab, switch to adjacent first
+    if (wasActive) {
+      const idx = groupPanes.findIndex(p => p.id === paneId);
+      const nextIdx = idx < groupPanes.length - 1 ? idx + 1 : idx - 1;
+      switchTab(groupPanes[nextIdx].id);
+    }
+
+    // Now delete the pane
+    deletePane(paneId);
+
+    // If only one tab remains, dissolve the group
+    const remaining = getTabGroupPanes(groupId);
+    if (remaining.length === 1) {
+      remaining[0].tabGroupId = null;
+      remaining[0].tabGroupActive = false;
+      cloudSaveLayout(remaining[0]);
+      // Remove the tab bar from the remaining pane
+      const el = document.getElementById(`pane-${remaining[0].id}`);
+      if (el) {
+        const bar = el.querySelector('.tab-bar');
+        if (bar) bar.remove();
+      }
+    } else {
+      refreshTabBars(groupId);
     }
   }
 
@@ -4992,6 +5570,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
             <button class="pane-zoom-btn zoom-in" data-tooltip="Zoom in">+</button>
           </div>
           <span class="connection-status connecting" data-tooltip="Connecting"></span>
+          <button class="pane-new-tab" aria-label="New tab" data-tooltip="New tab (Tab+=)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
           <button class="pane-expand" aria-label="Expand pane" data-tooltip="Expand">⛶</button>
           <button class="pane-close" aria-label="Close pane"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
@@ -5017,6 +5596,15 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
     // Initialize xterm.js
     initTerminal(pane, paneData);
+
+    // Render tab bar if this pane is part of a tab group
+    if (paneData.tabGroupId) {
+      renderTabBar(pane, paneData);
+      // Hide if not the active tab
+      if (!paneData.tabGroupActive) {
+        pane.style.display = 'none';
+      }
+    }
   }
 
   // Render a file pane
@@ -5569,8 +6157,13 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       overviewRulerLanes: 0,
       hideCursorInOverviewRuler: true,
       overviewRulerBorder: false,
-      contextmenu: true,
+      contextmenu: false,
       fixedOverflowWidgets: true,
+      quickSuggestions: false,
+      suggestOnTriggerCharacters: false,
+      wordBasedSuggestions: 'off',
+      parameterHints: { enabled: false },
+      suggest: { enabled: false },
       placeholder: 'Quick notes... (markdown supported)',
     });
 
@@ -5662,9 +6255,9 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
   }
 
   // Render markdown to HTML for preview mode (sanitized to prevent XSS)
-  function renderMarkdownPreview(markdown) {
+  async function renderMarkdownPreview(markdown) {
     if (window.marked) {
-      const raw = window.marked.parse(markdown || '', { breaks: true, gfm: true });
+      const raw = await window.marked.parse(markdown || '', { breaks: true, gfm: true });
       return window.DOMPurify ? window.DOMPurify.sanitize(raw) : raw;
     }
     // Fallback: escape HTML and convert newlines
@@ -5816,7 +6409,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         agentId: resolvedAgentId
       };
 
-      state.panes.push(pane);
+      state.panes.push(pane); _telemetry.trackPaneOpen(pane);
       renderFolderPane(pane);
       cloudSaveLayout(pane);
       saveRecentContext('folder', pane.folderPath, pane.folderPath.split('/').filter(Boolean).pop() || pane.folderPath, resolvedAgentId);
@@ -5848,7 +6441,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         agentId: resolvedAgentId
       };
 
-      state.panes.push(pane);
+      state.panes.push(pane); _telemetry.trackPaneOpen(pane);
       renderBeadsPane(pane);
       cloudSaveLayout(pane);
       saveRecentContext('beads', pane.projectPath, pane.projectPath.split('/').filter(Boolean).pop() || pane.projectPath, resolvedAgentId);
@@ -6235,7 +6828,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
           device: fp.device || null,
           agentId: agentId
         };
-        state.panes.push(newPane);
+        state.panes.push(newPane); _telemetry.trackPaneOpen(newPane);
         renderFilePane(newPane);
         cloudSaveLayout(newPane);
       } catch (e) {
@@ -6865,7 +7458,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     const mountEl = paneEl.querySelector('.note-editor-mount');
     const previewEl = paneEl.querySelector('.note-markdown-preview');
 
-    function enterTextOnly() {
+    async function enterTextOnly() {
       paneEl.classList.add('text-only');
       paneData.textOnly = true;
 
@@ -6878,7 +7471,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       // Hide Monaco, show rendered preview
       mountEl.style.display = 'none';
       previewEl.style.display = 'block';
-      previewEl.innerHTML = renderMarkdownPreview(paneData.content);
+      previewEl.innerHTML = await renderMarkdownPreview(paneData.content);
       const baseFontSize = paneData.fontSize || 14;
       const scale = (paneData.zoomLevel || 100) / 100;
       previewEl.style.fontSize = `${Math.round(baseFontSize * scale)}px`;
@@ -6935,7 +7528,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       paneEl.classList.add('text-only');
       mountEl.style.display = 'none';
       previewEl.style.display = 'block';
-      previewEl.innerHTML = renderMarkdownPreview(paneData.content);
+      renderMarkdownPreview(paneData.content).then(html => { previewEl.innerHTML = html; });
       const baseFontSize = paneData.fontSize || 14;
       const scale = (paneData.zoomLevel || 100) / 100;
       previewEl.style.fontSize = `${Math.round(baseFontSize * scale)}px`;
@@ -7492,6 +8085,16 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     const zoomInBtn = paneEl.querySelector('.zoom-in');
     const zoomOutBtn = paneEl.querySelector('.zoom-out');
 
+    // New tab button
+    const newTabBtn = paneEl.querySelector('.pane-new-tab');
+    if (newTabBtn) {
+      newTabBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        createTabInGroup(paneData.id);
+      });
+      newTabBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+    }
+
     // Apply device color to header
     applyDeviceHeaderColor(paneEl, paneData.device);
 
@@ -7536,6 +8139,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
             paneNameEl.classList.add('empty');
           }
           cloudSaveLayout(paneData);
+          if (paneData.tabGroupId) refreshTabBars(paneData.tabGroupId);
         };
 
         input.addEventListener('blur', commit);
@@ -7946,12 +8550,14 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     // Close button
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      deletePane(paneData.id);
+      if (paneData.tabGroupId) closeTabInGroup(paneData.id);
+      else deletePane(paneData.id);
     });
     closeBtn.addEventListener('touchend', (e) => {
       e.stopPropagation();
       e.preventDefault();
-      deletePane(paneData.id);
+      if (paneData.tabGroupId) closeTabInGroup(paneData.id);
+      else deletePane(paneData.id);
     });
 
     // Expand/Collapse button (only for terminal and file panes, not notes)
@@ -8253,6 +8859,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       paneEl.style.top = `${newY}px`;
       paneData.x = newX;
       paneData.y = newY;
+      syncTabGroupGeometry(paneData);
 
       // Move the rest of the group by the same delta
       if (isGroupDrag) {
@@ -8378,6 +8985,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       paneEl.style.height = `${newHeight}px`;
       paneData.width = newWidth;
       paneData.height = newHeight;
+      syncTabGroupGeometry(paneData);
 
       // Debounced refit terminal
       debouncedFit();
@@ -8442,6 +9050,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       console.error('[App] focusPane called with undefined paneData');
       return;
     }
+    const prevPane = lastFocusedPaneId ? state.panes.find(p => p.id === lastFocusedPaneId) : null;
+    _telemetry.track('pane.focus', {
+      pane_type: paneData.type || 'terminal',
+      previous_pane_type: prevPane ? (prevPane.type || 'terminal') : null,
+    });
     paneData.zIndex = state.nextZIndex++;
     const paneEl = document.getElementById(`pane-${paneData.id}`);
     if (paneEl) {
@@ -8656,6 +9269,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
           paneEl.style.top = `${newY}px`;
           paneData.x = newX;
           paneData.y = newY;
+          syncTabGroupGeometry(paneData);
 
           // Move rest of group by same delta
           const groupDx = newX - anchorStartX;
@@ -9098,6 +9712,485 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     );
   }
 
+  // ── Conversations Pane ──
+
+  async function createConversationsPane(dirPath, placementPos, targetAgentId, device) {
+    const resolvedAgentId = targetAgentId || activeAgentId;
+    const position = calcPlacementPos(placementPos, 260, 250);
+
+    try {
+      const reqBody = { dirPath, position, size: PANE_DEFAULTS['conversations'] };
+      if (device) reqBody.device = device;
+      const cpData = await agentRequest('POST', '/api/conversations-panes', reqBody, resolvedAgentId);
+
+      const pane = {
+        id: cpData.id,
+        type: 'conversations',
+        x: cpData.position.x,
+        y: cpData.position.y,
+        width: cpData.size.width,
+        height: cpData.size.height,
+        zIndex: state.nextZIndex++,
+        dirPath: cpData.dirPath,
+        device: device || cpData.device || null,
+        agentId: resolvedAgentId,
+        includeSubdirs: false,
+      };
+
+      state.panes.push(pane); _telemetry.trackPaneOpen(pane);
+      renderConversationsPane(pane);
+      cloudSaveLayout(pane);
+      saveRecentContext('conversations', pane.dirPath, pane.dirPath.split('/').filter(Boolean).pop() || pane.dirPath, resolvedAgentId);
+    } catch (e) {
+      console.error('[App] Failed to create conversations pane:', e);
+      alert('Failed to create conversations pane: ' + e.message);
+    }
+  }
+
+  function renderConversationsPane(paneData) {
+    const existingPane = document.getElementById(`pane-${paneData.id}`);
+    if (existingPane) existingPane.remove();
+
+    const pane = document.createElement('div');
+    pane.className = 'pane conversations-pane';
+    pane.id = `pane-${paneData.id}`;
+    pane.style.left = `${paneData.x}px`;
+    pane.style.top = `${paneData.y}px`;
+    pane.style.width = `${paneData.width}px`;
+    pane.style.height = `${paneData.height}px`;
+    pane.style.zIndex = paneData.zIndex;
+    pane.dataset.paneId = paneData.id;
+
+    if (!paneData.shortcutNumber) paneData.shortcutNumber = getNextShortcutNumber();
+    const deviceTag = paneData.device ? deviceLabelHtml(paneData.device) : '';
+    const shortDir = (paneData.dirPath || '').replace(/^\/home\/[^/]+/, '~').replace(/^\/Users\/[^/]+/, '~');
+    pane.innerHTML = `
+      <div class="pane-header">
+        <span class="pane-title convos-title">
+          ${deviceTag}<svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align: middle; margin-right: 4px;">${ICON_CONVERSATIONS}</svg>
+          Claude Sessions
+        </span>
+        ${paneNameHtml(paneData)}
+        <div class="pane-header-right">
+          ${shortcutBadgeHtml(paneData)}
+          <button class="pane-close" aria-label="Close pane"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+      </div>
+      <div class="convos-toolbar">
+        <span class="convos-dir-label" title="${escapeHtml(paneData.dirPath)}">${escapeHtml(shortDir)}</span>
+        <label class="convos-toggle-label">
+          <input type="checkbox" class="convos-subdirs-toggle" ${paneData.includeSubdirs ? 'checked' : ''}>
+          <span class="convos-toggle-text">Subdirs</span>
+        </label>
+        <button class="convos-refresh-btn" title="Refresh"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
+      </div>
+      <div class="convos-list"></div>
+      <div class="pane-resize-handle"></div>
+    `;
+
+    setupPaneListeners(pane, paneData);
+
+    // Subdirs toggle
+    const subdirToggle = pane.querySelector('.convos-subdirs-toggle');
+    subdirToggle.addEventListener('change', () => {
+      paneData.includeSubdirs = subdirToggle.checked;
+      fetchConversationsData(pane, paneData);
+    });
+
+    // Refresh button
+    const refreshBtn = pane.querySelector('.convos-refresh-btn');
+    refreshBtn.addEventListener('click', () => fetchConversationsData(pane, paneData));
+
+    canvas.appendChild(pane);
+
+    // Initial data fetch
+    fetchConversationsData(pane, paneData);
+  }
+
+  async function fetchConversationsData(pane, paneData) {
+    const listEl = pane.querySelector('.convos-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="convos-loading">Loading conversations...</div>';
+
+    try {
+      const depth = paneData.includeSubdirs ? 3 : 0;
+      const data = await agentRequest('GET',
+        `/api/conversations-panes/${paneData.id}/data?depth=${depth}`,
+        null, paneData.agentId);
+
+      const conversations = data.conversations || [];
+      listEl.innerHTML = '';
+
+      if (conversations.length === 0) {
+        listEl.innerHTML = '<div class="convos-empty">No Claude conversations found for this directory.</div>';
+        return;
+      }
+
+      // Get current Claude states for active indicator
+      let claudeStates = {};
+      try {
+        const statesData = await agentRequest('GET', '/api/terminals/states', null, paneData.agentId);
+        claudeStates = statesData || {};
+      } catch {}
+
+      // Build a set of active session IDs from Claude states
+      const activeSessionIds = new Set();
+      for (const [, stateInfo] of Object.entries(claudeStates)) {
+        if (stateInfo.isClaude && stateInfo.claudeSessionId) {
+          activeSessionIds.add(stateInfo.claudeSessionId);
+        }
+      }
+
+      // Also build a map of session ID -> state for status indicator
+      const sessionStateMap = {};
+      for (const [, stateInfo] of Object.entries(claudeStates)) {
+        if (stateInfo.isClaude && stateInfo.claudeSessionId) {
+          sessionStateMap[stateInfo.claudeSessionId] = stateInfo.state;
+        }
+      }
+
+      for (const convo of conversations) {
+        const isActive = activeSessionIds.has(convo.sessionId);
+        const claudeState = sessionStateMap[convo.sessionId] || null;
+        const item = document.createElement('div');
+        item.className = 'convos-item' + (isActive ? ' convos-item-active' : '');
+        item.setAttribute('data-nav-item', '');
+
+        const title = convo.customTitle || convo.firstPrompt || convo.sessionId.slice(0, 8);
+        const truncatedTitle = title.length > 80 ? title.slice(0, 80) + '...' : title;
+
+        // Time display
+        const modified = new Date(convo.lastModified);
+        const now = new Date();
+        const diffMs = now - modified;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        let timeStr;
+        if (diffMins < 1) timeStr = 'just now';
+        else if (diffMins < 60) timeStr = `${diffMins}m ago`;
+        else if (diffHours < 24) timeStr = `${diffHours}h ago`;
+        else if (diffDays < 7) timeStr = `${diffDays}d ago`;
+        else timeStr = modified.toLocaleDateString();
+
+        // Status indicator
+        let statusHtml = '';
+        if (isActive) {
+          const stateClass = claudeState === 'working' ? 'working' : (claudeState === 'idle' ? 'idle' : 'active');
+          const stateLabel = claudeState === 'working' ? 'Working' : (claudeState === 'idle' ? 'Idle' : (claudeState === 'permission_needed' ? 'Needs Input' : 'Active'));
+          statusHtml = `<span class="convos-status convos-status-${stateClass}">${stateLabel}</span>`;
+        }
+
+        // Metadata tags
+        let metaHtml = '';
+        if (convo.gitBranch && convo.gitBranch !== 'HEAD') {
+          metaHtml += `<span class="convos-meta-tag convos-tag-branch" title="Branch: ${escapeHtml(convo.gitBranch)}">${escapeHtml(convo.gitBranch.length > 30 ? convo.gitBranch.slice(0, 30) + '...' : convo.gitBranch)}</span>`;
+        }
+        if (convo.beadsIssueId) {
+          metaHtml += `<span class="convos-meta-tag convos-tag-beads" title="Beads: ${escapeHtml(convo.beadsIssueId)}">${escapeHtml(convo.beadsIssueId)}</span>`;
+        }
+        if (convo.worktree) {
+          metaHtml += `<span class="convos-meta-tag convos-tag-worktree" title="Worktree: ${escapeHtml(convo.worktree)}">WT</span>`;
+        }
+
+        item.innerHTML = `
+          <div class="convos-item-header">
+            <span class="convos-item-indicator ${isActive ? 'active' : 'inactive'}"></span>
+            <span class="convos-item-title">${escapeHtml(truncatedTitle)}</span>
+            ${statusHtml}
+            <span class="convos-item-time">${timeStr}</span>
+          </div>
+          ${metaHtml ? `<div class="convos-item-meta">${metaHtml}</div>` : ''}
+        `;
+
+        item.style.cursor = 'pointer';
+        item.addEventListener('click', () => showConversationDetail(pane, paneData, convo, isActive, claudeState));
+        item.addEventListener('mouseenter', () => { item.style.background = 'rgba(var(--accent-rgb),0.1)'; });
+        item.addEventListener('mouseleave', () => { item.style.background = ''; });
+
+        listEl.appendChild(item);
+      }
+
+      // Update pane title with count
+      const titleEl = pane.querySelector('.convos-title');
+      if (titleEl) {
+        const activeCount = conversations.filter(c => activeSessionIds.has(c.sessionId)).length;
+        const countStr = activeCount > 0 ? ` (${activeCount} active / ${conversations.length})` : ` (${conversations.length})`;
+        titleEl.innerHTML = `${paneData.device ? deviceLabelHtml(paneData.device) : ''}<svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align: middle; margin-right: 4px;">${ICON_CONVERSATIONS}</svg> Claude Sessions${countStr}`;
+      }
+    } catch (e) {
+      console.error('[App] Failed to fetch conversations:', e);
+      listEl.innerHTML = `<div class="convos-error">Failed to load: ${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  async function showConversationDetail(pane, paneData, convo, isActive, claudeState) {
+    // Hide toolbar and list, show detail view
+    const toolbar = pane.querySelector('.convos-toolbar');
+    const listEl = pane.querySelector('.convos-list');
+    if (toolbar) toolbar.style.display = 'none';
+    if (listEl) listEl.style.display = 'none';
+
+    // Remove existing detail view if any
+    const existingDetail = pane.querySelector('.convos-detail');
+    if (existingDetail) existingDetail.remove();
+
+    const detail = document.createElement('div');
+    detail.className = 'convos-detail';
+
+    const title = convo.customTitle || convo.firstPrompt || convo.sessionId.slice(0, 8);
+
+    // Status indicator for active sessions
+    let statusBadge = '';
+    if (isActive) {
+      const stateClass = claudeState === 'working' ? 'working' : (claudeState === 'idle' ? 'idle' : 'active');
+      const stateLabel = claudeState === 'working' ? 'Working' : (claudeState === 'idle' ? 'Idle' : (claudeState === 'permission_needed' ? 'Needs Input' : 'Active'));
+      statusBadge = `<span class="convos-status convos-status-${stateClass}">${stateLabel}</span>`;
+    }
+
+    detail.innerHTML = `
+      <div class="convos-detail-actionbar">
+        <button class="convos-back-btn" title="Back to list">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+        </button>
+        <div class="convos-detail-actions">
+          <button class="convos-action-btn convos-btn-open-claude" title="Open in Claude (resume session)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M6 8l4 4-4 4"/><line x1="12" y1="16" x2="18" y2="16"/></svg>
+            Resume
+          </button>
+          <button class="convos-action-btn convos-btn-extract" title="Extract conversation">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Extract
+          </button>
+          <button class="convos-action-btn convos-btn-summarize disabled" title="Summarize (coming soon)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="10" x2="16" y2="10"/><line x1="4" y1="14" x2="12" y2="14"/><line x1="4" y1="18" x2="8" y2="18"/></svg>
+            Summarize
+          </button>
+        </div>
+      </div>
+      <div class="convos-detail-header">
+        <div class="convos-detail-title">${escapeHtml(title.length > 120 ? title.slice(0, 120) + '...' : title)}</div>
+        ${statusBadge}
+      </div>
+      <div class="convos-detail-meta">
+        <div class="convos-detail-meta-row"><span class="convos-detail-label">Session</span><span class="convos-detail-value">${escapeHtml(convo.sessionId)}</span></div>
+        ${convo.cwd ? `<div class="convos-detail-meta-row"><span class="convos-detail-label">Directory</span><span class="convos-detail-value">${escapeHtml(convo.cwd)}</span></div>` : ''}
+        ${convo.gitBranch && convo.gitBranch !== 'HEAD' ? `<div class="convos-detail-meta-row"><span class="convos-detail-label">Branch</span><span class="convos-detail-value"><span class="convos-meta-tag convos-tag-branch">${escapeHtml(convo.gitBranch)}</span></span></div>` : ''}
+        ${convo.beadsIssueId ? `<div class="convos-detail-meta-row"><span class="convos-detail-label">Beads</span><span class="convos-detail-value"><span class="convos-meta-tag convos-tag-beads">${escapeHtml(convo.beadsIssueId)}</span></span></div>` : ''}
+        ${convo.worktree ? `<div class="convos-detail-meta-row"><span class="convos-detail-label">Worktree</span><span class="convos-detail-value"><span class="convos-meta-tag convos-tag-worktree">${escapeHtml(convo.worktree)}</span></span></div>` : ''}
+        <div class="convos-detail-meta-row"><span class="convos-detail-label">Last active</span><span class="convos-detail-value">${new Date(convo.lastModified).toLocaleString()}</span></div>
+        <div class="convos-detail-meta-row"><span class="convos-detail-label">Created</span><span class="convos-detail-value">${new Date(convo.createdAt).toLocaleString()}</span></div>
+        <div class="convos-detail-meta-row"><span class="convos-detail-label">Size</span><span class="convos-detail-value">${(convo.fileSize / 1024).toFixed(1)} KB</span></div>
+      </div>
+      <div class="convos-detail-messages">
+        <div class="convos-loading">Loading messages...</div>
+      </div>
+    `;
+
+    // Insert before resize handle
+    const resizeHandle = pane.querySelector('.pane-resize-handle');
+    pane.insertBefore(detail, resizeHandle);
+
+    // Back button
+    detail.querySelector('.convos-back-btn').addEventListener('click', () => {
+      detail.remove();
+      if (toolbar) toolbar.style.display = '';
+      if (listEl) listEl.style.display = '';
+    });
+
+    // Open in Claude button
+    detail.querySelector('.convos-btn-open-claude').addEventListener('click', async () => {
+      try {
+        const terminal = await agentRequest('POST', '/api/terminals', {
+          workingDir: convo.cwd || '~',
+        }, paneData.agentId);
+
+        // Create the terminal pane
+        const tPane = {
+          id: terminal.id,
+          type: 'terminal',
+          x: paneData.x + paneData.width + 20,
+          y: paneData.y,
+          width: PANE_DEFAULTS['terminal'].width,
+          height: PANE_DEFAULTS['terminal'].height,
+          zIndex: state.nextZIndex++,
+          tmuxSession: terminal.tmuxSession,
+          device: paneData.device || null,
+          agentId: paneData.agentId,
+        };
+        state.panes.push(tPane); _telemetry.trackPaneOpen(tPane);
+        renderPane(tPane);
+        cloudSaveLayout(tPane);
+
+        // Send the resume command after a short delay to let the terminal initialize
+        setTimeout(() => {
+          const cmd = `claude --resume ${convo.sessionId}\n`;
+          sendWs('terminal:input', { terminalId: terminal.id, data: btoa(cmd) }, paneData.agentId);
+        }, 800);
+      } catch (e) {
+        console.error('[Conversations] Failed to open in Claude:', e);
+        alert('Failed to open terminal: ' + e.message);
+      }
+    });
+
+    // Extract button
+    detail.querySelector('.convos-btn-extract').addEventListener('click', () => {
+      showExtractFormatPicker(detail, paneData, convo);
+    });
+
+    // Summarize button (placeholder)
+    detail.querySelector('.convos-btn-summarize').addEventListener('click', () => {
+      // Not wired yet
+    });
+
+    // Fetch message details
+    try {
+      const detailData = await agentRequest('GET',
+        `/api/conversations-panes/${paneData.id}/detail?sessionId=${encodeURIComponent(convo.sessionId)}`,
+        null, paneData.agentId);
+
+      const messagesEl = detail.querySelector('.convos-detail-messages');
+      if (!messagesEl) return;
+
+      const messages = detailData.messages || [];
+      if (messages.length === 0) {
+        messagesEl.innerHTML = '<div class="convos-empty">No messages found.</div>';
+        return;
+      }
+
+      messagesEl.innerHTML = '';
+      // Show up to 50 messages to avoid DOM overload
+      const displayMessages = messages.slice(0, 50);
+      for (const msg of displayMessages) {
+        const msgEl = document.createElement('div');
+        msgEl.className = `convos-message convos-message-${msg.role}`;
+        const roleLabel = msg.role === 'user' ? 'You' : 'Claude';
+        const timeStr = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : '';
+        const textPreview = msg.text.length > 500 ? msg.text.slice(0, 500) + '...' : msg.text;
+        msgEl.innerHTML = `
+          <div class="convos-message-header">
+            <span class="convos-message-role">${roleLabel}</span>
+            ${timeStr ? `<span class="convos-message-time">${timeStr}</span>` : ''}
+          </div>
+          <div class="convos-message-text">${escapeHtml(textPreview)}</div>
+        `;
+        messagesEl.appendChild(msgEl);
+      }
+      if (messages.length > 50) {
+        const moreEl = document.createElement('div');
+        moreEl.className = 'convos-empty';
+        moreEl.textContent = `... and ${messages.length - 50} more messages. Extract to see all.`;
+        messagesEl.appendChild(moreEl);
+      }
+    } catch (e) {
+      const messagesEl = detail.querySelector('.convos-detail-messages');
+      if (messagesEl) {
+        messagesEl.innerHTML = `<div class="convos-error">Failed to load messages: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+  }
+
+  function showExtractFormatPicker(detailEl, paneData, convo) {
+    // Remove existing picker if any
+    const existing = detailEl.querySelector('.convos-format-picker');
+    if (existing) { existing.remove(); return; }
+
+    const picker = document.createElement('div');
+    picker.className = 'convos-format-picker';
+
+    const formats = [
+      { id: 'markdown', label: 'Markdown (.md)', icon: 'M' },
+      { id: 'json', label: 'JSON (.json)', icon: '{}' },
+      { id: 'jsonl', label: 'Raw JSONL (.jsonl)', icon: '[]' },
+    ];
+
+    for (const fmt of formats) {
+      const btn = document.createElement('button');
+      btn.className = 'convos-format-option';
+      btn.setAttribute('data-nav-item', '');
+      btn.innerHTML = `<span class="convos-format-icon">${fmt.icon}</span> ${fmt.label}`;
+      btn.addEventListener('click', async () => {
+        picker.remove();
+        await downloadConversation(paneData, convo, fmt.id);
+      });
+      picker.appendChild(btn);
+    }
+
+    // Position near the extract button
+    const extractBtn = detailEl.querySelector('.convos-btn-extract');
+    const actionbar = detailEl.querySelector('.convos-detail-actionbar');
+    actionbar.appendChild(picker);
+
+    // Close on outside click
+    const closeHandler = (e) => {
+      if (!picker.contains(e.target) && e.target !== extractBtn) {
+        picker.remove();
+        document.removeEventListener('click', closeHandler, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler, true), 0);
+  }
+
+  async function downloadConversation(paneData, convo, format) {
+    try {
+      const data = await agentRequest('GET',
+        `/api/conversations-panes/${paneData.id}/extract?sessionId=${encodeURIComponent(convo.sessionId)}&format=${format}`,
+        null, paneData.agentId);
+
+      if (data.error) {
+        alert('Extract failed: ' + data.error);
+        return;
+      }
+
+      // Trigger browser download
+      const blob = new Blob([data.content], { type: data.mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = data.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('[Conversations] Extract failed:', e);
+      alert('Failed to extract conversation: ' + e.message);
+    }
+  }
+
+  async function showConversationsDirPickerThenPlace() {
+    showDevicePickerGeneric(
+      (d) => showRecentsOrBrowse('conversations', d.ip,
+        (dirPath) => enterPlacementMode('conversations', (pos) => createConversationsPane(dirPath, pos, d.ip, d.name)),
+        () => showConvosFolderPickerThenPlace(d.ip, d.name)
+      ),
+      () => showRecentsOrBrowse('conversations', activeAgentId,
+        (dirPath) => enterPlacementMode('conversations', (pos) => createConversationsPane(dirPath, pos)),
+        () => showConvosFolderPickerThenPlace()
+      )
+    );
+  }
+
+  async function showConvosFolderPickerThenPlace(targetAgentId, device) {
+    const deviceLabel = device ? deviceLabelHtml(device, 'font-size:11px; padding:2px 8px;') : '';
+    const headerHTML = `
+      <svg viewBox="0 0 24 24" width="16" height="16" style="color:rgba(255,255,255,0.6);">${ICON_CONVERSATIONS}</svg>
+      ${deviceLabel}
+      <span style="color:rgba(255,255,255,0.7); font-size:13px; font-weight:500;">Choose Directory</span>`;
+
+    showFolderScanPicker({
+      id: 'convos-dir-browser',
+      headerHTML,
+      scanLabel: 'Show conversations for this directory',
+      device,
+      targetAgentId,
+      onScan: async (folderPath, contentArea, closeBrowser) => {
+        closeBrowser();
+        enterPlacementMode('conversations', (pos) => createConversationsPane(folderPath, pos, targetAgentId, device));
+      }
+    });
+  }
+
   async function showFolderPaneDevicePickerThenPlace() {
     showDevicePickerGeneric(
       (d) => showRecentsOrBrowse('folder', d.ip,
@@ -9239,6 +10332,801 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
 
 
   // ============================================================================
+  // SECTION 19b: PROJECTS & CHECKPOINTS
+  // Project rectangles on canvas, checkpoint panes, projects sidebar
+  // ============================================================================
+
+  const PROJECT_COLORS = [
+    { name: 'Blue',    value: '59, 130, 246' },
+    { name: 'Green',   value: '34, 197, 94' },
+    { name: 'Purple',  value: '168, 85, 247' },
+    { name: 'Orange',  value: '249, 115, 22' },
+    { name: 'Pink',    value: '236, 72, 153' },
+    { name: 'Cyan',    value: '6, 182, 212' },
+    { name: 'Yellow',  value: '234, 179, 8' },
+    { name: 'Red',     value: '239, 68, 68' },
+  ];
+
+  function generateProjectId() {
+    return 'proj-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+
+  // Get panes that fall within a project's bounding rectangle (excludes checkpoint panes)
+  function getPanesInProject(project) {
+    return state.panes.filter(p => {
+      if (p.type === 'checkpoint') return false;
+      const px = p.x + p.width / 2;
+      const py = p.y + p.height / 2;
+      return px >= project.x && px <= project.x + project.width &&
+             py >= project.y && py <= project.y + project.height;
+    });
+  }
+
+  // Count pane states for a project (detailed: claude agents, working, done, input-needed, idle)
+  function getProjectPaneCounts(project) {
+    const panes = getPanesInProject(project);
+    let claude = 0, working = 0, done = 0, inputNeeded = 0, idle = 0, other = 0;
+    for (const p of panes) {
+      const el = document.getElementById(`pane-${p.id}`);
+      if (!el) { other++; continue; }
+      const isClaude = el.classList.contains('claude-working') ||
+        el.classList.contains('claude-idle') ||
+        el.classList.contains('claude-done') ||
+        el.classList.contains('claude-permission') ||
+        el.classList.contains('claude-question') ||
+        el.classList.contains('claude-input-needed');
+      if (isClaude) claude++;
+      if (el.classList.contains('claude-working')) working++;
+      else if (el.classList.contains('claude-done')) done++;
+      else if (el.classList.contains('claude-permission') || el.classList.contains('claude-question') || el.classList.contains('claude-input-needed')) inputNeeded++;
+      else if (el.classList.contains('claude-idle')) idle++;
+      else other++;
+    }
+    return { total: panes.length, claude, working, done, inputNeeded, idle, other };
+  }
+
+  // Navigate to a project with zoom-to-fit
+  function navigateToProject(project) {
+    // Calculate zoom to fit the project rectangle in viewport with padding
+    const padding = 60; // px padding around project
+    const viewW = window.innerWidth - padding * 2;
+    const viewH = window.innerHeight - padding * 2;
+    const zoomX = viewW / project.width;
+    const zoomY = viewH / project.height;
+    const targetZoom = Math.min(zoomX, zoomY, 2); // cap at 2x
+
+    state.zoom = targetZoom;
+    const centerX = project.x + project.width / 2;
+    const centerY = project.y + project.height / 2;
+    state.panX = window.innerWidth / 2 - centerX * state.zoom;
+    state.panY = window.innerHeight / 2 - centerY * state.zoom;
+
+    if (teleportAnimation) {
+      canvas.style.transition = 'transform 300ms cubic-bezier(0.4, 0, 0.2, 1)';
+      updateCanvasTransform();
+      setTimeout(() => { canvas.style.transition = ''; }, 320);
+    } else {
+      updateCanvasTransform();
+    }
+    saveViewState();
+  }
+
+  // Navigate to a checkpoint pane (center viewport on it)
+  function navigateToCheckpointPane(paneData) {
+    const centerX = paneData.x + paneData.width / 2;
+    const centerY = paneData.y + paneData.height / 2;
+    state.panX = window.innerWidth / 2 - centerX * state.zoom;
+    state.panY = window.innerHeight / 2 - centerY * state.zoom;
+
+    if (teleportAnimation) {
+      canvas.style.transition = 'transform 300ms cubic-bezier(0.4, 0, 0.2, 1)';
+      updateCanvasTransform();
+      setTimeout(() => { canvas.style.transition = ''; }, 320);
+    } else {
+      updateCanvasTransform();
+    }
+    saveViewState();
+  }
+
+  // Render project rectangles on the canvas
+  function renderProjectRectangles() {
+    canvas.querySelectorAll('.project-rect').forEach(el => el.remove());
+
+    for (const project of state.projects) {
+      const rect = document.createElement('div');
+      rect.className = 'project-rect';
+      rect.dataset.projectId = project.id;
+      rect.style.left = project.x + 'px';
+      rect.style.top = project.y + 'px';
+      rect.style.width = project.width + 'px';
+      rect.style.height = project.height + 'px';
+      rect.style.setProperty('--project-color', project.color);
+      rect.style.background = `rgba(${project.color}, 0.06)`;
+      rect.style.border = `2px solid rgba(${project.color}, 0.3)`;
+      rect.style.borderRadius = '16px';
+      rect.style.zIndex = '0';
+
+      // Project label — clickable button for rename/shortcut
+      const label = document.createElement('button');
+      label.className = 'project-rect-label';
+      label.style.color = `rgba(${project.color}, 0.8)`;
+      const shortcutHint = ` [${project.shortcutNumber || '?'}]`;
+      label.textContent = project.name + shortcutHint;
+      rect.appendChild(label);
+
+      // Resize handle
+      const resizeHandle = document.createElement('div');
+      resizeHandle.className = 'project-rect-resize';
+      rect.appendChild(resizeHandle);
+
+      // Setup interactions
+      setupProjectDrag(rect, project, label);
+      setupProjectResize(rect, project, resizeHandle);
+
+      canvas.insertBefore(rect, canvas.firstChild);
+    }
+  }
+
+  function setupProjectDrag(rectEl, project, labelEl) {
+    let dragging = false;
+    let startX, startY, origX, origY;
+    let clickStartTime = 0;
+    let moved = false;
+
+    labelEl.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      dragging = true;
+      moved = false;
+      clickStartTime = Date.now();
+      startX = e.clientX;
+      startY = e.clientY;
+      origX = project.x;
+      origY = project.y;
+
+      const moveHandler = (moveE) => {
+        if (!dragging) return;
+        const dx = (moveE.clientX - startX) / state.zoom;
+        const dy = (moveE.clientY - startY) / state.zoom;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+        project.x = origX + dx;
+        project.y = origY + dy;
+        rectEl.style.left = project.x + 'px';
+        rectEl.style.top = project.y + 'px';
+      };
+
+      const upHandler = () => {
+        dragging = false;
+        document.removeEventListener('mousemove', moveHandler);
+        document.removeEventListener('mouseup', upHandler);
+        if (moved) {
+          saveProjectsToCloud();
+          renderProjectsSidebar();
+        }
+      };
+
+      document.addEventListener('mousemove', moveHandler);
+      document.addEventListener('mouseup', upHandler);
+    });
+
+    // Left-click (no drag) on label: show project popup (rename + shortcut assign)
+    labelEl.addEventListener('click', (e) => {
+      if (moved) return; // was a drag, not a click
+      e.stopPropagation();
+      showProjectEditPopup(project, labelEl);
+    });
+
+    // Right-click context menu
+    rectEl.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showProjectContextMenu(e, project);
+    });
+  }
+
+  // Popup for editing project name and shortcut number (shown on label click)
+  function showProjectEditPopup(project, anchorEl) {
+    // Remove any existing popup
+    document.querySelectorAll('.project-edit-popup').forEach(el => el.remove());
+
+    const rect = anchorEl.getBoundingClientRect();
+    const popup = document.createElement('div');
+    popup.className = 'project-edit-popup';
+    popup.style.left = rect.left + 'px';
+    popup.style.top = (rect.bottom + 6) + 'px';
+
+    popup.innerHTML = `
+      <div class="project-edit-row">
+        <label class="project-edit-label">Name</label>
+        <input type="text" class="project-edit-input" value="${escapeHtml(project.name)}" />
+      </div>
+      <div class="project-edit-row">
+        <label class="project-edit-label">Shortcut</label>
+        <div class="project-edit-shortcut">
+          ${[1,2,3,4,5,6,7,8,9].map(n => {
+            const taken = state.panes.find(p => p.shortcutNumber === n) || state.projects.find(p => p.shortcutNumber === n && p.id !== project.id);
+            const isCurrent = project.shortcutNumber === n;
+            return `<button class="project-shortcut-num ${isCurrent ? 'active' : ''} ${taken && !isCurrent ? 'taken' : ''}" data-num="${n}">${n}</button>`;
+          }).join('')}
+          <button class="project-shortcut-num ${!project.shortcutNumber ? 'active' : ''}" data-num="0">-</button>
+        </div>
+      </div>
+      <div class="project-edit-row">
+        <label class="project-edit-label">Color</label>
+        <div class="project-edit-colors">
+          ${PROJECT_COLORS.map(c => `<button class="project-color-btn ${project.color === c.value ? 'active' : ''}" data-color="${c.value}" style="background: rgba(${c.value}, 0.8);"></button>`).join('')}
+        </div>
+      </div>
+      <div class="project-edit-actions">
+        <button class="project-edit-delete">Delete Project</button>
+      </div>
+    `;
+
+    document.body.appendChild(popup);
+
+    const nameInput = popup.querySelector('.project-edit-input');
+    nameInput.focus();
+    nameInput.select();
+
+    // Name change
+    const saveName = () => {
+      const newName = nameInput.value.trim();
+      if (newName && newName !== project.name) {
+        project.name = newName;
+        saveProjectsToCloud();
+        renderProjectRectangles();
+        renderProjectsSidebar();
+      }
+    };
+    nameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); saveName(); closePopup(); }
+      if (e.key === 'Escape') closePopup();
+      e.stopPropagation(); // prevent Tab chords from firing
+    });
+    nameInput.addEventListener('blur', saveName);
+
+    // Shortcut number buttons
+    popup.querySelectorAll('.project-shortcut-num').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const num = parseInt(btn.dataset.num, 10);
+        if (num === 0) {
+          project.shortcutNumber = null;
+        } else {
+          reassignShortcutNumber(project, num);
+        }
+        saveProjectsToCloud();
+        renderProjectRectangles();
+        renderProjectsSidebar();
+        closePopup();
+      });
+    });
+
+    // Color buttons
+    popup.querySelectorAll('.project-color-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        project.color = btn.dataset.color;
+        saveProjectsToCloud();
+        renderProjectRectangles();
+        renderProjectsSidebar();
+        closePopup();
+      });
+    });
+
+    // Delete button
+    popup.querySelector('.project-edit-delete').addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteProject(project.id);
+      closePopup();
+    });
+
+    function closePopup() {
+      popup.remove();
+      document.removeEventListener('mousedown', outsideClick);
+    }
+
+    const outsideClick = (e) => {
+      if (!popup.contains(e.target) && !anchorEl.contains(e.target)) {
+        saveName();
+        closePopup();
+      }
+    };
+    setTimeout(() => document.addEventListener('mousedown', outsideClick), 0);
+  }
+
+  function showProjectContextMenu(e, project) {
+    document.querySelectorAll('.project-context-menu').forEach(el => el.remove());
+
+    const menu = document.createElement('div');
+    menu.className = 'project-context-menu';
+    menu.style.left = e.clientX + 'px';
+    menu.style.top = e.clientY + 'px';
+
+    const goToBtn = document.createElement('button');
+    goToBtn.textContent = 'Go to Project';
+    goToBtn.addEventListener('click', () => { navigateToProject(project); menu.remove(); });
+
+    const renameBtn = document.createElement('button');
+    renameBtn.textContent = 'Edit Project';
+    renameBtn.addEventListener('click', () => {
+      menu.remove();
+      const labelEl = document.querySelector(`.project-rect[data-project-id="${project.id}"] .project-rect-label`);
+      if (labelEl) showProjectEditPopup(project, labelEl);
+    });
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = 'Delete Project';
+    deleteBtn.addEventListener('click', () => { deleteProject(project.id); menu.remove(); });
+
+    menu.appendChild(goToBtn);
+    menu.appendChild(renameBtn);
+    menu.appendChild(deleteBtn);
+    document.body.appendChild(menu);
+
+    const closeMenu = (ev) => {
+      if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', closeMenu); }
+    };
+    setTimeout(() => document.addEventListener('click', closeMenu), 0);
+  }
+
+  function setupProjectResize(rectEl, project, handleEl) {
+    let resizing = false;
+    let startX, startY, origW, origH;
+
+    handleEl.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      e.preventDefault();
+      resizing = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      origW = project.width;
+      origH = project.height;
+
+      const moveHandler = (moveE) => {
+        if (!resizing) return;
+        const dx = (moveE.clientX - startX) / state.zoom;
+        const dy = (moveE.clientY - startY) / state.zoom;
+        project.width = Math.max(200, origW + dx);
+        project.height = Math.max(150, origH + dy);
+        rectEl.style.width = project.width + 'px';
+        rectEl.style.height = project.height + 'px';
+      };
+
+      const upHandler = () => {
+        resizing = false;
+        document.removeEventListener('mousemove', moveHandler);
+        document.removeEventListener('mouseup', upHandler);
+        saveProjectsToCloud();
+        renderProjectsSidebar();
+      };
+
+      document.addEventListener('mousemove', moveHandler);
+      document.addEventListener('mouseup', upHandler);
+    });
+  }
+
+  function deleteProject(projectId) {
+    state.projects = state.projects.filter(p => p.id !== projectId);
+    saveProjectsToCloud();
+    renderProjectRectangles();
+    renderProjectsSidebar();
+  }
+
+  // Render a checkpoint pane (circle with name + shortcut badge)
+  function renderCheckpointPane(paneData) {
+    const existingPane = document.getElementById(`pane-${paneData.id}`);
+    if (existingPane) existingPane.remove();
+
+    const pane = document.createElement('div');
+    pane.className = 'pane checkpoint-pane';
+    pane.id = `pane-${paneData.id}`;
+    pane.style.left = `${paneData.x}px`;
+    pane.style.top = `${paneData.y}px`;
+    pane.style.width = `${paneData.width}px`;
+    pane.style.height = `${paneData.height}px`;
+    pane.style.zIndex = paneData.zIndex;
+    pane.dataset.paneId = paneData.id;
+
+    if (!paneData.shortcutNumber) paneData.shortcutNumber = getNextShortcutNumber();
+
+    pane.innerHTML = `
+      <div class="checkpoint-pane-circle">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z" fill="currentColor"/></svg>
+      </div>
+      <div class="checkpoint-pane-name">${escapeHtml(paneData.paneName || paneData.checkpointName || 'Checkpoint')}</div>
+      <div class="checkpoint-pane-badge">${paneData.shortcutNumber ? `Tab+${paneData.shortcutNumber}` : 'Tab+?'}</div>
+      <button class="checkpoint-pane-close" aria-label="Close"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    `;
+
+    canvas.appendChild(pane);
+
+    // Draggable via circle
+    const circleEl = pane.querySelector('.checkpoint-pane-circle');
+    let ckDragging = false, ckMoved = false, ckStartX, ckStartY, ckOrigX, ckOrigY;
+    circleEl.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      ckDragging = true;
+      ckMoved = false;
+      ckStartX = e.clientX;
+      ckStartY = e.clientY;
+      ckOrigX = paneData.x;
+      ckOrigY = paneData.y;
+      // Bring to front
+      paneData.zIndex = state.nextZIndex++;
+      pane.style.zIndex = paneData.zIndex;
+
+      const moveH = (me) => {
+        if (!ckDragging) return;
+        const dx = (me.clientX - ckStartX) / state.zoom;
+        const dy = (me.clientY - ckStartY) / state.zoom;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) ckMoved = true;
+        paneData.x = ckOrigX + dx;
+        paneData.y = ckOrigY + dy;
+        pane.style.left = paneData.x + 'px';
+        pane.style.top = paneData.y + 'px';
+      };
+      const upH = () => {
+        ckDragging = false;
+        document.removeEventListener('mousemove', moveH);
+        document.removeEventListener('mouseup', upH);
+        if (ckMoved) cloudSaveLayout(paneData);
+      };
+      document.addEventListener('mousemove', moveH);
+      document.addEventListener('mouseup', upH);
+    });
+
+    // Click circle (no drag) to teleport
+    circleEl.addEventListener('click', (e) => {
+      if (ckMoved) return;
+      e.stopPropagation();
+      navigateToCheckpointPane(paneData);
+    });
+
+    // Close button
+    pane.querySelector('.checkpoint-pane-close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      deletePane(paneData.id);
+    });
+
+    // Click on name to rename
+    const nameEl = pane.querySelector('.checkpoint-pane-name');
+    nameEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = paneData.paneName || paneData.checkpointName || 'Checkpoint';
+      input.className = 'checkpoint-rename-input';
+      nameEl.style.display = 'none';
+      circleEl.insertAdjacentElement('afterend', input);
+      input.focus();
+      input.select();
+
+      const finish = () => {
+        const newName = input.value.trim() || 'Checkpoint';
+        paneData.paneName = newName;
+        paneData.checkpointName = newName;
+        nameEl.textContent = newName;
+        nameEl.style.display = '';
+        input.remove();
+        cloudSaveLayout(paneData);
+        renderProjectsSidebar();
+      };
+
+      input.addEventListener('blur', finish);
+      input.addEventListener('keydown', (ke) => {
+        ke.stopPropagation();
+        if (ke.key === 'Enter') { ke.preventDefault(); input.blur(); }
+        if (ke.key === 'Escape') { input.value = paneData.paneName || 'Checkpoint'; input.blur(); }
+      });
+    });
+
+    // Click on badge to reassign shortcut
+    const badgeEl = pane.querySelector('.checkpoint-pane-badge');
+    if (badgeEl) {
+      badgeEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showShortcutAssignPopup(paneData);
+      });
+    }
+  }
+
+  // Create a new project via placement mode (draw rectangle)
+  function startProjectCreation() {
+    const colorIdx = state.projects.length % PROJECT_COLORS.length;
+    const color = PROJECT_COLORS[colorIdx].value;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'project-creation-overlay';
+    overlay.innerHTML = '<div class="project-creation-hint">Click and drag to draw a project area. Press Escape to cancel.</div>';
+    document.body.appendChild(overlay);
+
+    let drawing = false;
+    let startCanvasX, startCanvasY;
+    let previewRect = null;
+
+    const mousedownHandler = (e) => {
+      if (e.button !== 0) return;
+      drawing = true;
+      startCanvasX = (e.clientX - state.panX) / state.zoom;
+      startCanvasY = (e.clientY - state.panY) / state.zoom;
+
+      previewRect = document.createElement('div');
+      previewRect.className = 'project-creation-preview';
+      previewRect.style.background = `rgba(${color}, 0.1)`;
+      previewRect.style.border = `2px dashed rgba(${color}, 0.5)`;
+      previewRect.style.borderRadius = '16px';
+      previewRect.style.left = startCanvasX + 'px';
+      previewRect.style.top = startCanvasY + 'px';
+      canvas.appendChild(previewRect);
+    };
+
+    const mousemoveHandler = (e) => {
+      if (!drawing || !previewRect) return;
+      const curX = (e.clientX - state.panX) / state.zoom;
+      const curY = (e.clientY - state.panY) / state.zoom;
+      const x = Math.min(startCanvasX, curX);
+      const y = Math.min(startCanvasY, curY);
+      const w = Math.abs(curX - startCanvasX);
+      const h = Math.abs(curY - startCanvasY);
+      previewRect.style.left = x + 'px';
+      previewRect.style.top = y + 'px';
+      previewRect.style.width = w + 'px';
+      previewRect.style.height = h + 'px';
+    };
+
+    const mouseupHandler = (e) => {
+      if (!drawing) return;
+      drawing = false;
+
+      const endX = (e.clientX - state.panX) / state.zoom;
+      const endY = (e.clientY - state.panY) / state.zoom;
+      const x = Math.min(startCanvasX, endX);
+      const y = Math.min(startCanvasY, endY);
+      const w = Math.abs(endX - startCanvasX);
+      const h = Math.abs(endY - startCanvasY);
+
+      cleanup();
+
+      if (w < 100 || h < 80) return; // Too small, cancel
+
+      const project = {
+        id: generateProjectId(),
+        name: 'Project ' + (state.projects.length + 1),
+        color: color,
+        x, y,
+        width: w,
+        height: h,
+        shortcutNumber: getNextShortcutNumber(),
+      };
+      state.projects.push(project);
+      saveProjectsToCloud();
+      renderProjectRectangles();
+      renderProjectsSidebar();
+    };
+
+    const keyHandler = (e) => {
+      if (e.key === 'Escape') { drawing = false; cleanup(); }
+    };
+
+    function cleanup() {
+      overlay.remove();
+      if (previewRect) previewRect.remove();
+      document.removeEventListener('mousedown', mousedownHandler);
+      document.removeEventListener('mousemove', mousemoveHandler);
+      document.removeEventListener('mouseup', mouseupHandler);
+      document.removeEventListener('keydown', keyHandler, true);
+    }
+
+    document.addEventListener('mousedown', mousedownHandler);
+    document.addEventListener('mousemove', mousemoveHandler);
+    document.addEventListener('mouseup', mouseupHandler);
+    document.addEventListener('keydown', keyHandler, true);
+  }
+
+  // Create standalone checkpoint pane at viewport center
+  function createCheckpointPane() {
+    const centerX = (window.innerWidth / 2 - state.panX) / state.zoom;
+    const centerY = (window.innerHeight / 2 - state.panY) / state.zoom;
+    const checkpointCount = state.panes.filter(p => p.type === 'checkpoint').length;
+    const paneData = {
+      id: 'ckpt-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      type: 'checkpoint',
+      x: centerX - 30,
+      y: centerY - 30,
+      width: 60,
+      height: 60,
+      zIndex: state.nextZIndex++,
+      shortcutNumber: getNextShortcutNumber(),
+      checkpointName: 'Checkpoint ' + (checkpointCount + 1),
+      paneName: 'Checkpoint ' + (checkpointCount + 1),
+    };
+    state.panes.push(paneData);
+    renderCheckpointPane(paneData);
+    cloudSaveLayout(paneData);
+    renderProjectsSidebar();
+  }
+
+  // -- Projects Sidebar (center-top, expands downward) --
+  function createProjectsSidebar() {
+    const sidebar = document.createElement('div');
+    sidebar.id = 'projects-sidebar';
+    sidebar.className = 'tc-scrollbar';
+    sidebar.innerHTML = `
+      <div class="projects-sidebar-header">
+        <span class="projects-sidebar-title">Projects</span>
+        <div class="projects-sidebar-actions">
+          <button class="projects-sidebar-btn" id="add-project-btn" title="New Project (draw rectangle)">+P</button>
+          <button class="projects-sidebar-btn" id="add-checkpoint-btn" title="New Checkpoint pane">+C</button>
+        </div>
+      </div>
+      <div class="projects-sidebar-content"></div>
+    `;
+    document.body.appendChild(sidebar);
+
+    sidebar.querySelector('#add-project-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      startProjectCreation();
+    });
+
+    sidebar.querySelector('#add-checkpoint-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      createCheckpointPane();
+    });
+
+    applyProjectsSidebarPosition();
+    return sidebar;
+  }
+
+  function applyProjectsSidebarPosition() {
+    const sidebar = document.getElementById('projects-sidebar');
+    if (!sidebar) return;
+    // Reset positioning
+    sidebar.style.left = '';
+    sidebar.style.right = '';
+    sidebar.style.transform = '';
+
+    if (projectsSidebarPosition === 'left') {
+      sidebar.style.left = '16px';
+      sidebar.style.right = 'auto';
+    } else {
+      // right (default)
+      sidebar.style.right = '16px';
+      sidebar.style.left = 'auto';
+    }
+  }
+
+  function toggleProjectsSidebar() {
+    projectsSidebarVisible = !projectsSidebarVisible;
+    let sidebar = document.getElementById('projects-sidebar');
+    if (!sidebar) {
+      sidebar = createProjectsSidebar();
+    }
+    sidebar.classList.toggle('visible', projectsSidebarVisible);
+    if (projectsSidebarVisible) {
+      renderProjectsSidebar();
+    }
+  }
+
+  function renderProjectsSidebar() {
+    const content = document.querySelector('#projects-sidebar .projects-sidebar-content');
+    if (!content) return;
+
+    let html = '';
+
+    // Projects section
+    if (state.projects.length > 0) {
+      html += '<div class="ps-section-label">Projects</div>';
+      for (let i = 0; i < state.projects.length; i++) {
+        const project = state.projects[i];
+        const counts = getProjectPaneCounts(project);
+        const numberBadge = `<span class="ps-number-badge">${project.shortcutNumber ? `Tab+${project.shortcutNumber}` : 'Tab+?'}</span>`;
+
+        // Build detailed stats line
+        const stats = [];
+        stats.push(`<span class="ps-stat">${counts.total} panes</span>`);
+        if (counts.claude > 0) stats.push(`<span class="ps-stat ps-claude">${counts.claude} claude</span>`);
+        if (counts.working > 0) stats.push(`<span class="ps-stat ps-working">${counts.working} working</span>`);
+        if (counts.done > 0) stats.push(`<span class="ps-stat ps-done">${counts.done} done</span>`);
+        if (counts.inputNeeded > 0) stats.push(`<span class="ps-stat ps-input">${counts.inputNeeded} waiting</span>`);
+        if (counts.idle > 0) stats.push(`<span class="ps-stat ps-idle">${counts.idle} idle</span>`);
+
+        html += `<div class="ps-item ps-project" data-project-id="${project.id}">
+          <div class="ps-color-dot" style="background: rgba(${project.color}, 0.8);"></div>
+          <div class="ps-item-info">
+            <div class="ps-item-name">${escapeHtml(project.name)}</div>
+            <div class="ps-item-stats">${stats.join('')}</div>
+          </div>
+          ${numberBadge}
+        </div>`;
+      }
+    }
+
+    // Standalone checkpoint panes section
+    const checkpointPanes = state.panes.filter(p => p.type === 'checkpoint');
+    if (checkpointPanes.length > 0) {
+      html += '<div class="ps-section-label">Checkpoints</div>';
+      for (const ckpt of checkpointPanes) {
+        const ckptBadge = `<span class="ps-number-badge">${ckpt.shortcutNumber ? `Tab+${ckpt.shortcutNumber}` : 'Tab+?'}</span>`;
+        html += `<div class="ps-item ps-checkpoint" data-pane-id="${ckpt.id}">
+          <div class="ps-checkpoint-icon">
+            <svg viewBox="0 0 24 24" width="12" height="12"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z" fill="currentColor"/></svg>
+          </div>
+          <div class="ps-item-info">
+            <div class="ps-item-name">${escapeHtml(ckpt.paneName || ckpt.checkpointName || 'Checkpoint')}</div>
+          </div>
+          ${ckptBadge}
+          <button class="ps-delete-btn" data-delete-pane-id="${ckpt.id}" title="Delete checkpoint"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>`;
+      }
+    }
+
+    if (state.projects.length === 0 && checkpointPanes.length === 0) {
+      html = '<div class="ps-empty">No projects yet. Click +P to draw a project area on the canvas, or use the add menu.</div>';
+    }
+
+    content.innerHTML = html;
+
+    // Wire up click handlers
+    content.querySelectorAll('.ps-project').forEach(el => {
+      el.addEventListener('click', () => {
+        const projId = el.dataset.projectId;
+        const project = state.projects.find(p => p.id === projId);
+        if (project) navigateToProject(project);
+      });
+    });
+
+    content.querySelectorAll('.ps-checkpoint').forEach(el => {
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('.ps-delete-btn')) return; // handled below
+        const paneId = el.dataset.paneId;
+        const paneData = state.panes.find(p => p.id === paneId);
+        if (paneData) navigateToCheckpointPane(paneData);
+      });
+    });
+
+    // Delete buttons for checkpoints in sidebar
+    content.querySelectorAll('.ps-delete-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const paneId = btn.dataset.deletePaneId;
+        if (paneId) {
+          deletePane(paneId);
+          renderProjectsSidebar();
+        }
+      });
+    });
+  }
+
+  // Persistence: save/load projects via cloud API
+  let projectsSaveTimer = null;
+  function saveProjectsToCloud() {
+    if (projectsSaveTimer) clearTimeout(projectsSaveTimer);
+    projectsSaveTimer = setTimeout(() => {
+      cloudFetch('PUT', '/api/preferences', getAllPrefs({
+        projects: state.projects,
+      })).catch(e => console.error('[Projects] Save failed:', e.message));
+    }, 500);
+  }
+
+  function loadProjectsFromPrefs(prefs) {
+    if (prefs.projects && Array.isArray(prefs.projects)) {
+      state.projects = prefs.projects;
+    }
+  }
+
+  // Periodically refresh sidebar pane counts (every 5s when visible)
+  let projectsSidebarRefreshTimer = null;
+  function startProjectsSidebarRefresh() {
+    if (projectsSidebarRefreshTimer) clearInterval(projectsSidebarRefreshTimer);
+    projectsSidebarRefreshTimer = setInterval(() => {
+      if (projectsSidebarVisible) renderProjectsSidebar();
+    }, 5000);
+  }
+
+  // ============================================================================
   // SECTION 20: UI MENUS & TOOLBAR                               [Lines ~8954-9405]
   // setupAddPaneMenu(), setupTutorialMenu(), setupToolbarButtons(),
   // setupCustomTooltips(), setupCanvasInteraction(), calcMoveModeZoom()
@@ -9281,6 +11169,12 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         showBeadsRepoPickerWithDeviceThenPlace();
       } else if (type === 'folder') {
         showFolderPaneDevicePickerThenPlace();
+      } else if (type === 'conversations') {
+        showConversationsDirPickerThenPlace();
+      } else if (type === 'project') {
+        startProjectCreation();
+      } else if (type === 'checkpoint') {
+        createCheckpointPane();
       }
     }
 
@@ -10282,7 +12176,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         } else {
           // Single mode: close focused pane (fallback to DOM query if lastFocusedPaneId is stale)
           const targetId = lastFocusedPaneId || (document.querySelector('.pane.focused')?.dataset?.paneId);
-          if (targetId) deletePane(targetId);
+          if (targetId) {
+            const targetPane = state.panes.find(p => p.id === targetId);
+            if (targetPane && targetPane.tabGroupId) closeTabInGroup(targetId);
+            else deletePane(targetId);
+          }
         }
         return;
       }
@@ -10299,15 +12197,67 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         }
         return;
       }
-      // Tab+1..9: jump to pane with that shortcut number
+      // Tab+P: toggle projects sidebar
+      if (e.key === 'p' && tabHeld) {
+        tabChordUsed = true;
+        e.preventDefault();
+        e.stopPropagation();
+        toggleProjectsSidebar();
+        return;
+      }
+      // Tab+`: cycle to next tab in focused pane's tab group
+      if (e.key === '`' && tabHeld) {
+        tabChordUsed = true;
+        e.preventDefault();
+        e.stopPropagation();
+        const focusedPane = lastFocusedPaneId && state.panes.find(p => p.id === lastFocusedPaneId);
+        if (focusedPane && focusedPane.tabGroupId) {
+          const groupPanes = getTabGroupPanes(focusedPane.tabGroupId);
+          if (groupPanes.length > 1) {
+            const activeIdx = groupPanes.findIndex(p => p.tabGroupActive);
+            const nextIdx = (activeIdx + 1) % groupPanes.length;
+            switchTab(groupPanes[nextIdx].id);
+          }
+        }
+        return;
+      }
+      // Tab+=: create new tab in focused pane's group
+      if (e.key === '=' && tabHeld) {
+        tabChordUsed = true;
+        e.preventDefault();
+        e.stopPropagation();
+        if (lastFocusedPaneId) {
+          const focusedPane = state.panes.find(p => p.id === lastFocusedPaneId);
+          if (focusedPane && focusedPane.type === 'terminal') {
+            createTabInGroup(lastFocusedPaneId);
+          }
+        }
+        return;
+      }
+      // Tab+1..9: jump to pane or project with that shortcut number (shared pool)
       if (tabHeld && e.key >= '1' && e.key <= '9') {
         const num = parseInt(e.key, 10);
+        // Check panes first (includes checkpoint panes)
         const targetPane = state.panes.find(p => p.shortcutNumber === num);
         if (targetPane) {
           tabChordUsed = true;
           e.preventDefault();
           e.stopPropagation();
-          jumpToPane(targetPane);
+          if (targetPane.type === 'checkpoint') {
+            navigateToCheckpointPane(targetPane);
+          } else {
+            jumpToPane(targetPane);
+          }
+          return;
+        }
+        // Check projects (zoom-to-fit)
+        const targetProject = state.projects.find(p => p.shortcutNumber === num);
+        if (targetProject) {
+          tabChordUsed = true;
+          e.preventDefault();
+          e.stopPropagation();
+          navigateToProject(targetProject);
+          return;
         }
         return;
       }

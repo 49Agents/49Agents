@@ -2,22 +2,26 @@
 // SVG icon definitions, color palettes, config objects, and visual constants.
 // Pure data — no logic, no side effects, no state.
 
+export const APP_VERSION = '0.2.2';
+
 // ── Pane configuration ──
 
 export const PANE_DEFAULTS = {
-  'terminal':  { width: 600, height: 400 },
-  'file':      { width: 600, height: 400 },
-  'note':      { width: 400, height: 250 },
-  'git-graph': { width: 500, height: 450 },
-  'iframe':    { width: 800, height: 600 },
-  'beads':     { width: 520, height: 500 },
-  'folder':    { width: 400, height: 500 },
+  'terminal':       { width: 600, height: 400 },
+  'file':           { width: 600, height: 400 },
+  'note':           { width: 400, height: 250 },
+  'git-graph':      { width: 500, height: 450 },
+  'iframe':         { width: 800, height: 600 },
+  'beads':          { width: 520, height: 500 },
+  'folder':         { width: 400, height: 500 },
+  'conversations':  { width: 520, height: 500 },
 };
 
 export const PANE_ENDPOINT_MAP = {
   file: 'file-panes', note: 'notes', terminal: 'terminals',
   'git-graph': 'git-graphs', iframe: 'iframes',
   beads: 'beads-panes', folder: 'folder-panes',
+  conversations: 'conversations-panes',
 };
 
 // ── SVG icons (inner content, without <svg> wrapper) ──
@@ -27,6 +31,8 @@ export const ICON_BEADS = '<circle cx="6" cy="12" r="3" fill="currentColor" opac
 export const ICON_GIT_GRAPH = '<circle cx="7" cy="6" r="2.5" fill="currentColor"/><circle cx="17" cy="6" r="2.5" fill="currentColor"/><circle cx="7" cy="18" r="2.5" fill="currentColor"/><line x1="7" y1="8.5" x2="7" y2="15.5" stroke="currentColor" stroke-width="2"/><path d="M17 8.5c0 4-10 4-10 7" stroke="currentColor" stroke-width="2" fill="none"/>';
 
 export const ICON_FOLDER = '<path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z" fill="none" stroke="currentColor" stroke-width="2"/>';
+
+export const ICON_CONVERSATIONS = '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="12" cy="10" r="1" fill="currentColor"/><circle cx="15" cy="10" r="1" fill="currentColor"/>';
 
 // ── Claude state indicators ──
 

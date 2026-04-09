@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>49Agents — Telemetry Consent</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@200;400;600&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background-color: #050d18;
+      color: #c0c8d8;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background-image:
+        linear-gradient(rgba(218, 119, 86, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(218, 119, 86, 0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+    body::after {
+      content: '';
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, rgba(218, 119, 86, 0.08) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .consent-card {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 480px;
+      padding: 48px 40px;
+      background: rgba(10, 18, 30, 0.85);
+      border: 1px solid rgba(218, 119, 86, 0.15);
+      border-radius: 16px;
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      box-shadow:
+        0 24px 64px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(218, 119, 86, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    }
+    h2 {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 400;
+      font-size: 22px;
+      color: #e8ecf4;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+    .description {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 300;
+      font-size: 13px;
+      line-height: 1.7;
+      color: #8090a8;
+      margin-bottom: 28px;
+    }
+    .description ul {
+      margin-top: 12px;
+      padding-left: 20px;
+    }
+    .description li {
+      margin-bottom: 6px;
+    }
+    .continue-btn {
+      display: block;
+      width: 100%;
+      padding: 14px 24px;
+      background: rgba(218, 119, 86, 0.15);
+      border: 1px solid rgba(218, 119, 86, 0.3);
+      border-radius: 10px;
+      color: #da7756;
+      font-family: 'Montserrat', sans-serif;
+      font-size: 15px;
+      font-weight: 400;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .continue-btn:hover {
+      background: rgba(218, 119, 86, 0.25);
+      border-color: rgba(218, 119, 86, 0.5);
+      transform: translateY(-1px);
+    }
+    .continue-btn:active { transform: translateY(0); }
+    .continue-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    @media (max-width: 480px) {
+      .consent-card { margin: 16px; padding: 36px 28px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="consent-card">
+    <h2>A quick note</h2>
+
+    <div class="description">
+      49Agents is a small project just getting started, and understanding how people use the app helps us make it better. We collect basic usage data tied to your account -- things like which features get used, how long sessions last, and how many panes you open. No terminal content, file data, or commands are ever collected.
+      <br><br>
+      You can turn this off anytime in Settings.
+    </div>
+
+    <button class="continue-btn" id="continue-btn">Got it</button>
+  </div>
+
+  <script>
+    document.getElementById('continue-btn').addEventListener('click', async function() {
+      var btn = this;
+      btn.disabled = true;
+      btn.textContent = 'Loading...';
+
+      try {
+        var res = await fetch('/api/auth/telemetry-consent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ consent: true }),
+          credentials: 'include',
+        });
+
+        if (res.ok) {
+          window.location.href = '/';
+        } else {
+          btn.textContent = 'Error -- try again';
+          btn.disabled = false;
+          setTimeout(function() { btn.textContent = 'Got it'; }, 3000);
+        }
+      } catch (e) {
+        btn.textContent = 'Network error';
+        btn.disabled = false;
+        setTimeout(function() { btn.textContent = 'Got it'; }, 3000);
+      }
+    });
+  </script>
+</body>
+</html>

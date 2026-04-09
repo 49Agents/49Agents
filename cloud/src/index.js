@@ -17,6 +17,10 @@ import { setupDownloadRoutes } from './routes/download.js';
 import { setupPreferencesRoutes } from './routes/preferences.js';
 import { setupAnalyticsRoutes } from './routes/analytics.js';
 import { setupWebSocketRelay } from './ws/relay.js';
+import { setupNotificationRoutes } from './routes/notifications.js';
+import { setupCloudCallbackRoutes } from './auth/cloudCallback.js';
+import { ensureLocalAuthTable, isLocalMode } from './auth/localAuth.js';
+import { initLocalTelemetryCollector } from './telemetry/localCollector.js';
 import { config } from './config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -124,12 +128,26 @@ setupDownloadRoutes(app);
 // ---------------------------------------------------------------------------
 setupGitHubAuth(app);
 setupGoogleAuth(app);
+setupCloudCallbackRoutes(app);
+
+// Auth mode endpoint (public — tells the login page if we're local or cloud)
+app.get('/api/auth/mode', (req, res) => {
+  res.json({
+    mode: isLocalMode() ? 'local' : 'cloud',
+    cloudAuthUrl: isLocalMode() ? config.cloudAuthUrl : undefined,
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Login page (public)
 // ---------------------------------------------------------------------------
 app.get('/login', (req, res) => {
   res.sendFile('login.html', { root: publicDir });
+});
+
+// Telemetry consent page (local mode only, shown after first cloud auth)
+app.get('/consent', (req, res) => {
+  res.sendFile('consent.html', { root: publicDir });
 });
 
 // ---------------------------------------------------------------------------
@@ -153,11 +171,52 @@ setupPreferencesRoutes(app);
 setupAnalyticsRoutes(app);
 
 // ---------------------------------------------------------------------------
-// Main app entry point (skip auth in dev mode)
+// Feedback proxy (local mode only — forwards /api/messages to cloud server)
+// ---------------------------------------------------------------------------
+if (isLocalMode()) {
+  const { getLocalAuth } = await import('./auth/localAuth.js');
+
+  async function proxyToCloud(req, res) {
+    const localAuth = getLocalAuth();
+    if (!localAuth || !localAuth.cloudToken) {
+      return res.status(401).json({ error: 'Not authenticated with cloud' });
+    }
+    const cloudUrl = config.cloudAuthUrl;
+    const url = `${cloudUrl}${req.originalUrl}`;
+    const opts = {
+      method: req.method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localAuth.cloudToken}`,
+      },
+      signal: AbortSignal.timeout(10000),
+    };
+    if (req.method !== 'GET' && req.body) {
+      opts.body = JSON.stringify(req.body);
+    }
+    try {
+      const resp = await fetch(url, opts);
+      const data = await resp.json();
+      res.status(resp.status).json(data);
+    } catch (err) {
+      console.error('[feedback-proxy] Error:', err.message);
+      res.status(502).json({ error: 'Cloud server unreachable' });
+    }
+  }
+
+  app.get('/api/messages', proxyToCloud);
+  app.post('/api/messages', proxyToCloud);
+  app.get('/api/messages/unread-count', proxyToCloud);
+  app.post('/api/messages/mark-read', proxyToCloud);
+}
+
+// ---------------------------------------------------------------------------
+// Main app entry point (auth required in both cloud and local modes)
+// SKIP_CLOUD_AUTH env var bypasses auth for contributors in local dev
 // ---------------------------------------------------------------------------
 const hasOAuth = config.github.clientId || config.google.clientId;
 const devModeEnabled = !hasOAuth && config.nodeEnv !== 'production';
-if (devModeEnabled) {
+if (devModeEnabled && process.env.SKIP_CLOUD_AUTH) {
   app.get('/', (req, res) => res.sendFile('index.html', { root: publicDir }));
 } else {
   app.get('/', requireAuth, (req, res) => res.sendFile('index.html', { root: publicDir }));
@@ -186,17 +245,12 @@ app.get('/pair', requireAuth, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Catch-all: redirect unmatched routes to /login
-// ---------------------------------------------------------------------------
-app.get('*', (req, res) => {
-  res.redirect('/login');
-});
-
-// ---------------------------------------------------------------------------
 // Initialize database and start server with WebSocket relay
 // ---------------------------------------------------------------------------
 async function start() {
   initDatabase();
+  ensureLocalAuthTable();
+  initLocalTelemetryCollector();
 
   // Read latest agent version from the tarball
   let latestAgentVersion = null;
@@ -228,6 +282,9 @@ async function start() {
   // Set up the WebSocket relay (handles /ws and /agent-ws upgrade routes)
   const { userAgents, userBrowsers } = setupWebSocketRelay(server, { latestAgentVersion });
 
+  // Notification routes (user-facing: fetch + dismiss)
+  setupNotificationRoutes(app);
+
   // Load extensions if present (private/cloud-only features)
   const extensionsDir = resolve(__dirname, '..', '..', 'extensions');
   if (existsSync(resolve(extensionsDir, 'setup.js'))) {
@@ -239,6 +296,12 @@ async function start() {
       console.error('[cloud] Failed to load extensions:', err.message);
     }
   }
+
+  // Catch-all: redirect unmatched routes to /login
+  // Must be registered AFTER extensions so their routes take priority
+  app.get('*', (req, res) => {
+    res.redirect('/login');
+  });
 
   server.listen(config.port, config.host, () => {
     console.log(`[cloud] 49Agents Cloud Server`);

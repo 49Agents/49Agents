@@ -1,4 +1,5 @@
 import { getDb } from './index.js';
+import { queueTelemetryEvent } from '../telemetry/localCollector.js';
 
 /**
  * Record an event to the events table.
@@ -11,6 +12,9 @@ export function recordEvent(eventType, userId = null, metadata = null) {
   db.prepare(
     'INSERT INTO events (event_type, user_id, metadata) VALUES (?, ?, ?)'
   ).run(eventType, userId, metadata ? JSON.stringify(metadata) : null);
+
+  // Also queue for cloud telemetry reporting (no-ops if collector inactive)
+  queueTelemetryEvent(eventType, userId, metadata);
 }
 
 /**

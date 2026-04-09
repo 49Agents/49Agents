@@ -1,6 +1,6 @@
 {
   "name": "@49agents/agent",
-  "version": "0.1.0",
+  "version": "0.2.2",
   "type": "module",
   "main": "src/index.js",
   "bin": {

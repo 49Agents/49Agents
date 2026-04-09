@@ -121,6 +121,23 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_user_sender_read ON messages(user_id, sender, read_at);
 
+CREATE TABLE IF NOT EXISTS notifications (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       TEXT REFERENCES users(id) ON DELETE CASCADE,
+  message       TEXT NOT NULL,
+  type          TEXT NOT NULL DEFAULT 'info' CHECK(type IN ('info', 'warning', 'error')),
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at);
+
+CREATE TABLE IF NOT EXISTS notification_dismissals (
+  notification_id INTEGER NOT NULL REFERENCES notifications(id) ON DELETE CASCADE,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  dismissed_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (notification_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS recent_pane_contexts (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
