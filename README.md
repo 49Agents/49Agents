@@ -2,7 +2,7 @@
   <img alt="49Agents" src="https://github.com/user-attachments/assets/93d237b6-e1ec-40ea-aa30-6feb72ca6599" height="120" />
 </p>
 
-<h1 align="center">49 Agents IDE</h1>
+<h1 align="center">49 Agents IDE TEST</h1>
 
 <p align="center">The first 2D agentic IDE. Open source.</p>
 
