@@ -33,7 +33,8 @@ export function setupCloudCallbackRoutes(app) {
       path: '/',
     });
 
-    const redirectUri = `http://localhost:${localPort}/auth/cloud-callback`;
+    const host = req.hostname || 'localhost';
+    const redirectUri = `http://${host}:${localPort}/auth/cloud-callback`;
     const grantUrl = `${cloudAuthUrl}/auth/local-grant?redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`;
     res.redirect(grantUrl);
   });
@@ -61,7 +62,8 @@ export function setupCloudCallbackRoutes(app) {
       }
 
       // Exchange code for token by calling the cloud server
-      const redirectUri = `http://localhost:${localPort}/auth/cloud-callback`;
+      const host = req.hostname || 'localhost';
+      const redirectUri = `http://${host}:${localPort}/auth/cloud-callback`;
       const exchangeUrl = `${cloudAuthUrl}/auth/local-grant/exchange`;
 
       const exchangeRes = await fetch(exchangeUrl, {

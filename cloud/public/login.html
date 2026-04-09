@@ -341,7 +341,7 @@
           // Local mode: rewrite OAuth buttons to go through cloud server
           var cloudUrl = data.cloudAuthUrl || 'https://app.49agents.com';
           var localPort = location.port || '1071';
-          var redirectUri = 'http://localhost:' + localPort + '/auth/cloud-callback';
+          var redirectUri = 'http://' + location.hostname + ':' + localPort + '/auth/cloud-callback';
 
           var ghBtn = document.querySelector('a[href^="/auth/github"]');
           var googleBtn = document.querySelector('a[href^="/auth/google"]');
