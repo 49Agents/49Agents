@@ -3,7 +3,7 @@ import { FitAddon } from './lib/addon-fit.mjs';
 import { WebLinksAddon } from './lib/addon-web-links.mjs';
 import { playDismissSound, playNotificationSound, setSoundEnabled as _setSoundEnabled } from './modules/sounds.js';
 import { escapeHtml, formatBytes, metricColorClass, formatLocationPath, isExternalInputFocused, truncateUrl, isAgentVersionOutdated, getTerminalFontFamily } from './modules/utils.js';
-import { PANE_DEFAULTS, PANE_ENDPOINT_MAP, ICON_BEADS, ICON_GIT_GRAPH, ICON_FOLDER, ICON_CONVERSATIONS, CLAUDE_STATE_SVGS, CLAUDE_LOGO_SVG, RESET_ICON_SVG, WIFI_OFF_SVG, DEVICE_COLORS, TERMINAL_FONTS, CANVAS_BACKGROUNDS, osIcon } from './modules/constants.js';
+import { APP_VERSION, PANE_DEFAULTS, PANE_ENDPOINT_MAP, ICON_BEADS, ICON_GIT_GRAPH, ICON_FOLDER, ICON_CONVERSATIONS, CLAUDE_STATE_SVGS, CLAUDE_LOGO_SVG, RESET_ICON_SVG, WIFI_OFF_SVG, DEVICE_COLORS, TERMINAL_FONTS, CANVAS_BACKGROUNDS, osIcon } from './modules/constants.js';
 import { initMinimap, startMinimapLoop, hideMinimap, renderMinimap, getCanvasBounds, calcPlacementPos, setMinimapEnabled, getMinimapEnabled } from './modules/minimap.js';
 import { initNotificationDeps, initNotifications, showPromoToasts, showToast, dismissToast, snoozeNotification, sendBrowserNotification, updateTabTitleBadge, handleStateTransition, previousClaudeStates, notifiedStates, activeToasts, snoozedNotifications, snoozeCount, getIsFirstClaudeStateUpdate, setIsFirstClaudeStateUpdate, getNotificationContainer, showAdminToast, dismissAdminToast } from './modules/notifications.js';
 import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modules/git-graph.js';
@@ -1406,6 +1406,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       <div class="hud-header agents-hud-header">
         <span class="hud-title">Usage</span>
         <span class="agents-hud-pct" id="agents-hud-pct"></span>
+        <button id="agents-usage-refresh" title="Refresh usage" style="background:none;border:none;color:#6a6a8a;cursor:pointer;padding:0 2px;line-height:1;font-size:13px;margin-left:4px;opacity:0.7;transition:opacity 0.15s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7">&#x21bb;</button>
       </div>
       <div class="agents-hud-content"></div>
     `;
@@ -1422,6 +1423,11 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
         }
       });
       renderAgentsHud();
+    });
+
+    hud.querySelector('#agents-usage-refresh').addEventListener('click', (e) => {
+      e.stopPropagation();
+      fetchAgentsUsage(true);
     });
 
     // Polling starts when first agent comes online (see updateAgentsHud)
@@ -1633,33 +1639,32 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     };
   }
 
-  async function fetchAgentsUsage() {
-    // Query all online agents in parallel — use first successful response
-    // (usage data is per-account, so any online agent returns the same data)
+  async function fetchAgentsUsage(force = false) {
+    // Query agents sequentially — stop at first success.
+    // (usage data is per-account, so any agent returns the same data; parallel
+    // requests against the same OAuth token trigger Anthropic rate limits)
     const onlineAgents = agents.filter(a => a.online);
     if (onlineAgents.length === 0) return;
-    try {
-      const results = await Promise.allSettled(
-        onlineAgents.map(a => agentRequest('GET', '/api/usage', null, a.agentId))
-      );
-      const first = results.find(r => r.status === 'fulfilled' && r.value);
-      if (first) {
-        agentsUsageData = first.value;
-        agentsUsageLastUpdated = Date.now();
-        agentsUsageFetchError = null;
-        renderAgentsHud();
-      } else {
-        // All agents failed — extract first error for display
-        const firstErr = results.find(r => r.status === 'rejected');
-        agentsUsageFetchError = firstErr ? (firstErr.reason?.message || 'Failed to fetch usage') : 'No response from agents';
-        console.warn('[usage] All agents failed to return usage data:', results.map(r => r.status === 'rejected' ? r.reason?.message : 'fulfilled-empty').join(', '));
-        renderAgentsHud();
+    const path = force ? '/api/usage?force=true' : '/api/usage';
+    let lastError = null;
+    for (const agent of onlineAgents) {
+      try {
+        const data = await agentRequest('GET', path, null, agent.agentId);
+        if (data) {
+          agentsUsageData = data;
+          if (!data.stale) agentsUsageLastUpdated = Date.now();
+          agentsUsageFetchError = null;
+          renderAgentsHud();
+          return;
+        }
+      } catch (e) {
+        lastError = e.message || 'Failed to fetch usage';
+        console.warn(`[usage] Agent ${agent.agentId.slice(0,8)} failed:`, e.message);
       }
-    } catch (e) {
-      agentsUsageFetchError = e.message || 'Unexpected error';
-      console.warn('[usage] fetchAgentsUsage error:', e);
-      renderAgentsHud();
     }
+    agentsUsageFetchError = lastError || 'No response from agents';
+    console.warn('[usage] All agents failed to return usage data');
+    renderAgentsHud();
   }
 
   function agentsUsageColorClass(pct) {
@@ -1738,10 +1743,12 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     if (agentsUsageLastUpdated) {
       const ago = Math.floor((Date.now() - agentsUsageLastUpdated) / 60000);
       const agoText = ago < 1 ? 'just now' : `${ago}m ago`;
-      const stale = ago >= 10;
-      const color = stale ? '#e85' : '#666';
+      const isStale = ago >= 10;
+      const color = isStale ? '#e85' : '#666';
       let updatedLine = `<div class="agents-last-updated" style="text-align:right;font-size:10px;color:${color};margin-top:4px;">Updated ${agoText}`;
-      if (agentsUsageFetchError && stale) {
+      if (agentsUsageData?.stale) {
+        updatedLine += ` <span style="color:#e85;" title="Anthropic rate limited — showing cached data">\u00b7 data may be outdated</span>`;
+      } else if (agentsUsageFetchError && isStale) {
         updatedLine += ` <span style="color:#e55;">\u00b7 update failed</span>`;
       }
       updatedLine += `</div>`;
@@ -2984,6 +2991,10 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
           <kbd style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;font-family:inherit;color:#ccc;">Shift+Scroll</kbd><span style="color:#9999b8;">Pan canvas (over panes)</span>
           <kbd style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;font-family:inherit;color:#ccc;">Middle-drag</kbd><span style="color:#9999b8;">Pan canvas (anywhere)</span>
         </div>
+      </div>
+
+      <div style="padding-top:14px;text-align:center;">
+        <span style="font-size:10px;color:#3a3a5a;letter-spacing:0.5px;">49agents v${APP_VERSION}</span>
       </div>
     `;
 

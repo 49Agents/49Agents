@@ -481,7 +481,8 @@ export function createMessageRouter(sendToRelay, options = {}) {
         // === Usage (proxy to Anthropic API with caching) ===
         case 'GET /api/usage': {
           const now = Date.now();
-          if (usageCache && (now - usageCacheTime) < USAGE_CACHE_TTL) {
+          const force = query.force === 'true';
+          if (!force && usageCache && (now - usageCacheTime) < USAGE_CACHE_TTL) {
             return respond(200, usageCache);
           }
           try {
@@ -500,6 +501,10 @@ export function createMessageRouter(sendToRelay, options = {}) {
             if (!resp.ok) {
               const text = await resp.text();
               console.warn(`[usage] Anthropic API returned ${resp.status}:`, text.slice(0, 200));
+              // On rate limit, serve stale cache if available rather than failing
+              if (resp.status === 429 && usageCache) {
+                return respond(200, { ...usageCache, stale: true });
+              }
               return respond(resp.status, { error: text });
             }
             const data = await resp.json();

@@ -2,6 +2,8 @@
 // SVG icon definitions, color palettes, config objects, and visual constants.
 // Pure data — no logic, no side effects, no state.
 
+export const APP_VERSION = '0.2.2';
+
 // ── Pane configuration ──
 
 export const PANE_DEFAULTS = {
