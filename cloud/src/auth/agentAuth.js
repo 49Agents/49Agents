@@ -10,6 +10,7 @@ import { jwtVerify, SignJWT } from 'jose';
 import { config } from '../config.js';
 import { upsertUser, getUserById } from '../db/users.js';
 import { getLocalAuth } from './localAuth.js';
+import { getEmailAuth } from './emailAuth.js';
 
 const hasOAuth = !!(config.github.clientId || config.google.clientId);
 const isProduction = config.nodeEnv === 'production';
@@ -47,21 +48,36 @@ export async function verifyAgentToken(token) {
       };
     }
 
-    // Local mode: use the cloud-authenticated identity
+    // Local mode: use the cloud-authenticated identity or email auth
     const localAuth = getLocalAuth();
-    if (!localAuth) {
-      throw new Error('Local instance not authenticated with cloud. Open the app in your browser to sign in first.');
+    if (localAuth) {
+      const user = getUserById(localAuth.cloudUserId) || upsertUser({
+        githubLogin: localAuth.githubLogin,
+        email: localAuth.email,
+        displayName: localAuth.displayName || 'Local User',
+        avatarUrl: localAuth.avatarUrl,
+      });
+      return {
+        agentId: 'agent_dev_local',
+        userId: user.id,
+      };
     }
-    const user = getUserById(localAuth.cloudUserId) || upsertUser({
-      githubLogin: localAuth.githubLogin,
-      email: localAuth.email,
-      displayName: localAuth.displayName || 'Local User',
-      avatarUrl: localAuth.avatarUrl,
-    });
-    return {
-      agentId: 'agent_dev_local',
-      userId: user.id,
-    };
+
+    // Fall back to email-based local auth
+    const emailAuth = getEmailAuth();
+    if (emailAuth) {
+      const user = upsertUser({
+        email: emailAuth.email,
+        displayName: emailAuth.email.split('@')[0],
+        avatarUrl: null,
+      });
+      return {
+        agentId: 'agent_dev_local',
+        userId: user.id,
+      };
+    }
+
+    throw new Error('Local instance not authenticated. Open the app in your browser to sign in first.');
   }
 
   const secret = encodeSecret(config.jwt.agentSecret);

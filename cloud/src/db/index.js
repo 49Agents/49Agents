@@ -155,6 +155,20 @@ export function initDatabase() {
     db.prepare("ALTER TABLE users ADD COLUMN guest_started_at TEXT").run();
   } catch (e) { /* already exists */ }
 
+  // Migration: projects, focus_mode, sidebar_position, teleport_animation columns on user_preferences
+  try {
+    db.prepare("ALTER TABLE user_preferences ADD COLUMN projects TEXT NOT NULL DEFAULT '[]'").run();
+  } catch (e) { /* already exists */ }
+  try {
+    db.prepare("ALTER TABLE user_preferences ADD COLUMN focus_mode INTEGER NOT NULL DEFAULT 0").run();
+  } catch (e) { /* already exists */ }
+  try {
+    db.prepare("ALTER TABLE user_preferences ADD COLUMN sidebar_position TEXT NOT NULL DEFAULT 'right'").run();
+  } catch (e) { /* already exists */ }
+  try {
+    db.prepare("ALTER TABLE user_preferences ADD COLUMN teleport_animation INTEGER NOT NULL DEFAULT 1").run();
+  } catch (e) { /* already exists */ }
+
   // Migration: display_name column on agents
   try {
     db.prepare("ALTER TABLE agents ADD COLUMN display_name TEXT").run();

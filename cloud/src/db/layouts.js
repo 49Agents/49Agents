@@ -97,6 +97,8 @@ export function upsertPaneLayout(userId, pane) {
     INSERT INTO pane_layouts (id, user_id, agent_id, pane_type, position_x, position_y, width, height, z_index, metadata, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(id) DO UPDATE SET
+      agent_id = excluded.agent_id,
+      pane_type = excluded.pane_type,
       position_x = excluded.position_x,
       position_y = excluded.position_y,
       width = excluded.width,

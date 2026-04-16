@@ -79,14 +79,15 @@ app.use(
           "https://cdnjs.cloudflare.com",
           "https://cdn.jsdelivr.net",
         ],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-        fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "data:"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com", "data:"],
         imgSrc: ["'self'", "data:", "blob:", "https:"],
         connectSrc: ["'self'", "ws:", "wss:"],
         workerSrc: ["'self'", "blob:"],  // Monaco web workers
         frameSrc: ["'self'", "https:"],  // Iframe panes
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
+        upgradeInsecureRequests: config.nodeEnv === 'production' ? [] : null,
       },
     },
     crossOriginEmbedderPolicy: false, // Allow embedding iframes in the canvas
