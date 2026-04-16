@@ -74,6 +74,10 @@ CREATE TABLE IF NOT EXISTS user_preferences (
   terminal_font      TEXT NOT NULL DEFAULT 'JetBrains Mono',
   hud_state          TEXT NOT NULL DEFAULT '{}',
   tutorials_completed TEXT NOT NULL DEFAULT '{}',
+  projects           TEXT NOT NULL DEFAULT '[]',
+  focus_mode         INTEGER NOT NULL DEFAULT 0,
+  sidebar_position   TEXT NOT NULL DEFAULT 'right',
+  teleport_animation INTEGER NOT NULL DEFAULT 1,
   updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

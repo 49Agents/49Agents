@@ -19,13 +19,17 @@ export function setupPreferencesRoutes(app) {
       terminalFont: prefs.terminal_font || 'JetBrains Mono',
       hudState: prefs.hud_state ? JSON.parse(prefs.hud_state) : {},
       tutorialsCompleted: prefs.tutorials_completed ? JSON.parse(prefs.tutorials_completed) : {},
+      projects: prefs.projects ? JSON.parse(prefs.projects) : [],
+      focusMode: !!prefs.focus_mode,
+      projectsSidebarPosition: prefs.sidebar_position || 'right',
+      teleportAnimation: prefs.teleport_animation !== 0,
     });
   });
 
   // PUT /api/preferences — save user's preferences
   app.put('/api/preferences', requireAuth, (req, res) => {
-    const { nightMode, terminalTheme, notificationSound, autoRemoveDone, canvasBg, snoozeDuration, terminalFont, hudState, tutorialsCompleted } = req.body;
-    savePreferences(req.user.id, { nightMode, terminalTheme, notificationSound, autoRemoveDone, canvasBg, snoozeDuration, terminalFont, hudState, tutorialsCompleted });
+    const { nightMode, terminalTheme, notificationSound, autoRemoveDone, canvasBg, snoozeDuration, terminalFont, hudState, tutorialsCompleted, projects, focusMode, projectsSidebarPosition, teleportAnimation } = req.body;
+    savePreferences(req.user.id, { nightMode, terminalTheme, notificationSound, autoRemoveDone, canvasBg, snoozeDuration, terminalFont, hudState, tutorialsCompleted, projects, focusMode, projectsSidebarPosition, teleportAnimation });
     res.json({ ok: true });
   });
 }
