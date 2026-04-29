@@ -29,7 +29,10 @@
         "filter": [
           "**/*",
           "!node_modules/.cache/**",
-          "!**/*.map"
+          "!node_modules/.package-lock.json",
+          "!**/*.map",
+          "!src-client/**",
+          "!data/**"
         ]
       },
       {
@@ -37,7 +40,8 @@
         "to": "agent",
         "filter": [
           "**/*",
-          "!node_modules/.cache/**"
+          "!node_modules/.cache/**",
+          "!node_modules/.package-lock.json"
         ]
       }
     ],
