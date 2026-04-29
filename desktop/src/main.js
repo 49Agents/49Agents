@@ -5,14 +5,14 @@ import { request } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { execSync, execFileSync } from 'child_process';
-import { appendFileSync, mkdirSync } from 'fs';
+import { appendFileSync, mkdirSync, cpSync, existsSync } from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const isDev = !app.isPackaged;
 const repoRoot = isDev ? join(__dirname, '..', '..') : process.resourcesPath;
-const cloudDir = join(repoRoot, 'cloud');
-const agentDir = join(repoRoot, 'agent');
+let cloudDir = join(repoRoot, 'cloud');
+let agentDir = join(repoRoot, 'agent');
 
 // Augment PATH so child processes can find Homebrew binaries (tmux, ttyd, node).
 const EXTRA_PATHS = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'];
@@ -39,6 +39,39 @@ function log(...args) {
   const line = `[${new Date().toISOString()}] ${args.join(' ')}\n`;
   console.log(...args);
   if (logFile) { try { appendFileSync(logFile, line); } catch {} }
+}
+
+// In a packaged .app, resources are read-only and node_modules are stripped.
+// Copy cloud+agent to userData on first launch and npm install there.
+function prepareServices(userData) {
+  const nodeBin = findNode();
+  const npmBin = join(dirname(nodeBin), 'npm');
+
+  for (const name of ['cloud', 'agent']) {
+    const src = join(repoRoot, name);
+    const dest = join(userData, name);
+    const nm = join(dest, 'node_modules');
+
+    if (!existsSync(nm)) {
+      log(`copying ${name} to userData...`);
+      mkdirSync(dest, { recursive: true });
+      cpSync(src, dest, { recursive: true, force: true });
+      log(`npm install in ${dest}...`);
+      execFileSync(npmBin, ['install', '--omit=dev', '--silent'], {
+        cwd: dest,
+        timeout: 120000,
+      });
+      log(`${name} ready`);
+    } else {
+      log(`${name} already prepared`);
+    }
+  }
+
+  // Return the writable dirs
+  return {
+    cloudDir: join(userData, 'cloud'),
+    agentDir: join(userData, 'agent'),
+  };
 }
 
 let tray = null;
@@ -379,6 +412,16 @@ app.whenReady().then(async () => {
   createTray();
 
   try {
+    if (app.isPackaged) {
+      // Resources dir is read-only; copy cloud+agent to writable userData and
+      // npm install there on first launch.
+      log('preparing services in userData...');
+      const prepared = prepareServices(userData);
+      cloudDir = prepared.cloudDir;
+      agentDir = prepared.agentDir;
+      log('cloudDir:', cloudDir, 'agentDir:', agentDir);
+    }
+
     appPort = await findFreePort();
     await startCloud(appPort);
     startAgent(appPort);
