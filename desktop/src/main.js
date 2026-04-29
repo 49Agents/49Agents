@@ -13,6 +13,10 @@ const repoRoot = isDev ? join(__dirname, '..', '..') : process.resourcesPath;
 const cloudDir = join(repoRoot, 'cloud');
 const agentDir = join(repoRoot, 'agent');
 
+// Augment PATH so child processes can find Homebrew binaries (tmux, ttyd, node).
+const EXTRA_PATHS = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'];
+process.env.PATH = [...new Set([...EXTRA_PATHS, ...(process.env.PATH || '').split(':')])].join(':');
+
 let tray = null;
 let dashboardWindow = null;
 let mainWindow = null;
@@ -54,10 +58,20 @@ function getPublicState() {
 // ── Dependency check ──────────────────────────────────────────────────────────
 
 function checkDependencies() {
+  // Packaged apps don't inherit the user's shell PATH, so `which` may fail
+  // even when binaries exist. Check known Homebrew locations explicitly.
+  const searchPaths = [
+    '/opt/homebrew/bin',  // Apple Silicon
+    '/usr/local/bin',     // Intel
+    '/usr/bin',
+  ];
   const missing = [];
   for (const bin of ['tmux', 'ttyd']) {
-    try { execSync(`which ${bin}`, { stdio: 'ignore' }); }
-    catch { missing.push(bin); }
+    const found = searchPaths.some(dir => {
+      try { execSync(`test -x "${dir}/${bin}"`, { stdio: 'ignore' }); return true; }
+      catch { return false; }
+    });
+    if (!found) missing.push(bin);
   }
   return missing;
 }
