@@ -50,10 +50,14 @@ function findFreePort() {
 
 function spawnCloud(port) {
   return new Promise((resolve, reject) => {
+    const userData = app.getPath('userData');
     const env = {
       ...process.env,
       PORT: String(port),
       NODE_ENV: 'development',
+      // Write the DB to userData so it survives app updates and is never
+      // inside the read-only app bundle when packaged.
+      DATABASE_PATH: join(userData, 'tc.db'),
     };
 
     cloudProcess = spawn('node', ['src/index.js'], {
@@ -62,34 +66,32 @@ function spawnCloud(port) {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    let ready = false;
+    let resolved = false;
+
+    const settle = (fn, val) => {
+      if (!resolved) {
+        resolved = true;
+        fn(val);
+      }
+    };
 
     const onData = (data) => {
-      const text = data.toString();
-      // Cloud server logs "Listening on" or similar when ready.
-      // We poll instead — resolve after a short delay giving it time to bind.
-      if (!ready) {
-        ready = true;
-        setTimeout(() => resolve(), 1500);
+      if (data.toString().includes('[cloud] Listening on')) {
+        settle(resolve, undefined);
       }
     };
 
     cloudProcess.stdout.on('data', onData);
     cloudProcess.stderr.on('data', onData);
 
-    cloudProcess.on('error', reject);
+    cloudProcess.on('error', (err) => settle(reject, err));
 
     cloudProcess.on('exit', (code) => {
-      if (!ready) reject(new Error(`Cloud exited with code ${code} before becoming ready`));
+      settle(reject, new Error(`Cloud exited with code ${code} before becoming ready`));
     });
 
-    // Fallback: resolve after 4 seconds regardless
-    setTimeout(() => {
-      if (!ready) {
-        ready = true;
-        resolve();
-      }
-    }, 4000);
+    // Safety net: if the ready log never comes, resolve anyway after 6s.
+    setTimeout(() => settle(resolve, undefined), 6000);
   });
 }
 
