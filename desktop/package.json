@@ -1,0 +1,59 @@
+{
+  "name": "49agents-desktop",
+  "version": "0.1.0",
+  "description": "49Agents desktop app for macOS",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "prestart": "cd ../cloud && npm install --silent && cd ../agent && npm install --silent",
+    "start": "electron .",
+    "build": "electron-builder --mac",
+    "build:dmg": "electron-builder --mac dmg"
+  },
+  "build": {
+    "appId": "com.49agents.desktop",
+    "productName": "49Agents",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "!node_modules"
+    ],
+    "extraResources": [
+      {
+        "from": "../cloud",
+        "to": "cloud",
+        "filter": [
+          "**/*",
+          "!node_modules/.cache/**",
+          "!**/*.map"
+        ]
+      },
+      {
+        "from": "../agent",
+        "to": "agent",
+        "filter": [
+          "**/*",
+          "!node_modules/.cache/**"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64", "x64"]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "49Agents"
+    }
+  },
+  "devDependencies": {
+    "electron": "^36.0.0",
+    "electron-builder": "^26.0.0"
+  }
+}
