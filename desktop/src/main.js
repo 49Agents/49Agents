@@ -42,14 +42,15 @@ function log(...args) {
 }
 
 // In a packaged .app, resources are read-only and node_modules are stripped.
-// Copy cloud+agent to userData on first launch and npm install there.
+// Copy cloud+agent to userData on first launch, npm install, then build tarball.
 function prepareServices(userData) {
   const nodeBin = findNode();
   const npmBin = join(dirname(nodeBin), 'npm');
+  const destCloud = join(userData, 'cloud');
+  const destAgent = join(userData, 'agent');
 
-  for (const name of ['cloud', 'agent']) {
+  for (const [name, dest] of [['cloud', destCloud], ['agent', destAgent]]) {
     const src = join(repoRoot, name);
-    const dest = join(userData, name);
     const nm = join(dest, 'node_modules');
 
     if (!existsSync(nm)) {
@@ -67,11 +68,16 @@ function prepareServices(userData) {
     }
   }
 
-  // Return the writable dirs
-  return {
-    cloudDir: join(userData, 'cloud'),
-    agentDir: join(userData, 'agent'),
-  };
+  // Build the agent tarball so the cloud's /dl/49-agent.tar.gz route works.
+  const tarball = join(destCloud, 'dl', '49-agent.tar.gz');
+  if (!existsSync(tarball)) {
+    log('building agent tarball...');
+    mkdirSync(join(destCloud, 'dl'), { recursive: true });
+    execFileSync('tar', ['czf', tarball, 'agent'], { cwd: userData, timeout: 30000 });
+    log('agent tarball built');
+  }
+
+  return { cloudDir: destCloud, agentDir: destAgent };
 }
 
 let tray = null;
@@ -387,8 +393,6 @@ ipcMain.handle('action', async (_, action) => {
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
-app.dock.hide();
-
 app.whenReady().then(async () => {
   const userData = app.getPath('userData');
   mkdirSync(userData, { recursive: true });
@@ -438,7 +442,13 @@ app.whenReady().then(async () => {
   }
 });
 
-// Keep running in tray when all windows are closed
-app.on('window-all-closed', () => {});
+app.on('window-all-closed', () => {
+  // Keep running — user can reopen via dock or tray.
+});
+
+app.on('activate', () => {
+  // Dock icon clicked — bring up main window if server is running.
+  if (appPort) openMainWindow();
+});
 
 app.on('will-quit', killAll);
