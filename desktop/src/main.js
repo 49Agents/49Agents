@@ -336,18 +336,10 @@ function killAll() {
 
 // ── Tray ──────────────────────────────────────────────────────────────────────
 
-function makeTrayIcon(status) {
-  // Template image: black on transparent — macOS inverts automatically for
-  // light/dark menu bar. A small dot beneath the "49" text shows run state.
-  const dotColor = status === 'running' ? '#000' : status === 'starting' ? '#000' : '#000';
-  const dotOpacity = status === 'stopped' ? '0.35' : '1';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
-    <text x="11" y="13" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="9" font-weight="700" fill="#000">49</text>
-    <circle cx="11" cy="18" r="2" fill="${dotColor}" opacity="${dotOpacity}"/>
-  </svg>`;
-  const img = nativeImage.createFromDataURL(
-    `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`
-  );
+function makeTrayIcon() {
+  // PNG template image — filename contains "Template" so macOS auto-inverts
+  // for light/dark menu bar. @2x version is used automatically on retina.
+  const img = nativeImage.createFromPath(join(__dirname, '..', 'assets', 'trayTemplate.png'));
   img.setTemplateImage(true);
   return img;
 }
@@ -361,7 +353,7 @@ function overallStatus() {
 
 function updateTray() {
   if (!tray) return;
-  tray.setImage(makeTrayIcon(overallStatus()));
+  tray.setImage(makeTrayIcon());
 
   const isRunning = state.cloud === 'running';
   const isBusy = state.cloud === 'starting' || state.agent === 'starting';
@@ -383,7 +375,7 @@ function updateTray() {
 }
 
 function createTray() {
-  tray = new Tray(makeTrayIcon('stopped'));
+  tray = new Tray(makeTrayIcon());
   tray.setToolTip('49Agents');
   tray.on('click', openDashboard);
   updateTray();
