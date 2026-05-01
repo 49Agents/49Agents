@@ -133,6 +133,19 @@ function prepareServices(userData) {
     }
   }
 
+  // Always rebuild better-sqlite3 against the node that will actually run the
+  // server — the pre-built binary in the bundle may have a different ABI.
+  log('rebuilding better-sqlite3 for current node ABI...');
+  try {
+    execFileSync(npmBin, ['rebuild', 'better-sqlite3', '--silent'], {
+      cwd: destCloud,
+      timeout: 60000,
+    });
+    log('better-sqlite3 ready');
+  } catch (err) {
+    log('better-sqlite3 rebuild failed:', err.message);
+  }
+
   // Build the agent tarball so the cloud's /dl/49-agent.tar.gz route works.
   const tarball = join(destCloud, 'dl', '49-agent.tar.gz');
   if (!existsSync(tarball)) {
