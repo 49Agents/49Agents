@@ -1,6 +1,6 @@
 {
   "name": "49agents-desktop",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "49Agents desktop app for macOS",
   "type": "module",
   "main": "src/main.js",
@@ -21,7 +21,7 @@
     "files": [
       "src/**/*",
       "assets/**/*",
-      "!node_modules"
+      "package.json"
     ],
     "extraResources": [
       {
