@@ -435,10 +435,11 @@ function openMainWindow() {
     minWidth: 800,
     minHeight: 600,
     title: '49Agents',
-    webPreferences: { nodeIntegration: false, contextIsolation: true },
+    webPreferences: { nodeIntegration: false, contextIsolation: true, webSecurity: false },
   });
 
   mainWindow.loadURL(`http://127.0.0.1:${appPort}`);
+  if (isDev) mainWindow.webContents.openDevTools();
 
   mainWindow.webContents.on('did-fail-load', (_e, code) => {
     if (code !== -3) setTimeout(() => mainWindow?.loadURL(`http://127.0.0.1:${appPort}`), 500);
