@@ -82,8 +82,6 @@ const EXTRA_PATHS = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'];
 process.env.PATH = [...new Set([...EXTRA_PATHS, ...(process.env.PATH || '').split(':')])].join(':');
 
 // Find the node binary that matches the ABI of the cloud's native modules.
-// Reads the node path written by scripts/prestart.js so spawn uses the exact
-// same node that ran `npm install`, preventing better-sqlite3 ABI mismatches.
 function findNode() {
   try {
     const recorded = readFileSync('/tmp/49agents-node-path.txt', 'utf8').trim();
@@ -110,8 +108,6 @@ function log(...args) {
   if (logFile) { try { appendFileSync(logFile, line); } catch {} }
 }
 
-// In a packaged .app, resources are read-only and node_modules are stripped.
-// Copy cloud+agent to userData on first launch, npm install, then build tarball.
 function prepareServices(userData) {
   const nodeBin = findNode();
   const npmBin = join(dirname(nodeBin), 'npm');
@@ -137,8 +133,6 @@ function prepareServices(userData) {
     }
   }
 
-  // Always rebuild better-sqlite3 against the node that will actually run the
-  // server — the pre-built binary in the bundle may have a different ABI.
   log('rebuilding better-sqlite3 for current node ABI...');
   try {
     execFileSync(npmBin, ['rebuild', 'better-sqlite3', '--silent'], {
@@ -150,7 +144,6 @@ function prepareServices(userData) {
     log('better-sqlite3 rebuild failed:', err.message);
   }
 
-  // Build the agent tarball so the cloud's /dl/49-agent.tar.gz route works.
   const tarball = join(destCloud, 'dl', '49-agent.tar.gz');
   if (!existsSync(tarball)) {
     log('building agent tarball...');
@@ -172,9 +165,11 @@ let appPort = null;
 // ── State ─────────────────────────────────────────────────────────────────────
 
 const state = {
-  cloud: 'stopped',  // 'stopped' | 'starting' | 'running' | 'error'
-  agent: 'stopped',
+  cloud: 'stopped',  // 'stopped' | 'starting' | 'running' | 'stopping' | 'error'
+  agent: 'stopped',  // 'stopped' | 'starting' | 'running' | 'stopping' | 'error'
   port: null,
+  cloudStartedAt: null,
+  agentStartedAt: null,
   cloudLogs: [],
   agentLogs: [],
 };
@@ -185,7 +180,7 @@ function pushLog(service, text) {
     if (!line.trim()) continue;
     const entry = { t: Date.now(), line };
     state[`${service}Logs`].push(entry);
-    if (state[`${service}Logs`].length > 500) state[`${service}Logs`].shift();
+    if (state[`${service}Logs`].length > 1000) state[`${service}Logs`].shift();
     dashboardWindow?.webContents.send('log', { service, ...entry });
   }
 }
@@ -197,19 +192,19 @@ function setState(patch) {
 }
 
 function getPublicState() {
-  return { cloud: state.cloud, agent: state.agent, port: state.port };
+  return {
+    cloud: state.cloud,
+    agent: state.agent,
+    port: state.port,
+    cloudStartedAt: state.cloudStartedAt,
+    agentStartedAt: state.agentStartedAt,
+  };
 }
 
 // ── Dependency check ──────────────────────────────────────────────────────────
 
 function checkDependencies() {
-  // Packaged apps don't inherit the user's shell PATH, so `which` may fail
-  // even when binaries exist. Check known Homebrew locations explicitly.
-  const searchPaths = [
-    '/opt/homebrew/bin',  // Apple Silicon
-    '/usr/local/bin',     // Intel
-    '/usr/bin',
-  ];
+  const searchPaths = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'];
   const missing = [];
   for (const bin of ['tmux', 'ttyd']) {
     const found = searchPaths.some(dir => {
@@ -236,7 +231,7 @@ function findFreePort() {
 
 // ── HTTP poll ─────────────────────────────────────────────────────────────────
 
-function waitForServer(port, timeout = 20000) {
+function waitForServer(port, timeout = 30000) {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + timeout;
     const probe = () => {
@@ -251,11 +246,23 @@ function waitForServer(port, timeout = 20000) {
   });
 }
 
+// Wait for a process to exit gracefully, SIGKILL as fallback.
+function waitForExit(proc, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    if (!proc) { resolve(); return; }
+    const timer = setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch {}
+      resolve();
+    }, timeoutMs);
+    proc.once('exit', () => { clearTimeout(timer); resolve(); });
+  });
+}
+
 // ── Process management ────────────────────────────────────────────────────────
 
 async function startCloud(port) {
   if (cloudProcess) return;
-  setState({ cloud: 'starting' });
+  setState({ cloud: 'starting', cloudStartedAt: null });
 
   const userData = app.getPath('userData');
   const nodeBin = findNode();
@@ -281,28 +288,29 @@ async function startCloud(port) {
   cloudProcess.on('error', (err) => {
     log('[cloud] spawn error:', err.message);
     pushLog('cloud', `[error] ${err.message}`);
-    setState({ cloud: 'error' });
+    setState({ cloud: 'error', cloudStartedAt: null });
     cloudProcess = null;
   });
   cloudProcess.on('exit', (code) => {
     log('[cloud] exited with code', code);
-    pushLog('cloud', `[exited with code ${code}]`);
-    setState({ cloud: 'stopped' });
+    if (code !== null && code !== 0) pushLog('cloud', `[exited with code ${code}]`);
+    // Don't overwrite a 'starting' state set by restartAll
+    if (state.cloud !== 'starting') setState({ cloud: 'stopped', port: null, cloudStartedAt: null });
     cloudProcess = null;
   });
 
   try {
     await waitForServer(port);
-    setState({ cloud: 'running', port });
+    setState({ cloud: 'running', port, cloudStartedAt: Date.now() });
   } catch (err) {
-    setState({ cloud: 'error' });
+    setState({ cloud: 'error', cloudStartedAt: null });
     throw err;
   }
 }
 
 function startAgent(port) {
   if (agentProcess) return;
-  setState({ agent: 'starting' });
+  setState({ agent: 'starting', agentStartedAt: null });
 
   const nodeBin = findNode();
   const env = { ...process.env, TC_CLOUD_URL: `ws://127.0.0.1:${port}` };
@@ -312,38 +320,63 @@ function startAgent(port) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  agentProcess.stdout.on('data', (d) => pushLog('agent', d.toString()));
+  agentProcess.stdout.on('data', (d) => {
+    const text = d.toString();
+    pushLog('agent', text);
+    // Mark running once the agent logs a successful connection
+    if (state.agent === 'starting' && /connect|ready|started|listening/i.test(text)) {
+      setState({ agent: 'running', agentStartedAt: Date.now() });
+    }
+  });
   agentProcess.stderr.on('data', (d) => pushLog('agent', d.toString()));
   agentProcess.on('error', (err) => {
     pushLog('agent', `[error] ${err.message}`);
-    setState({ agent: 'error' });
+    setState({ agent: 'error', agentStartedAt: null });
     agentProcess = null;
   });
   agentProcess.on('exit', (code) => {
-    pushLog('agent', `[exited with code ${code}]`);
-    setState({ agent: 'stopped' });
+    if (code !== null && code !== 0) pushLog('agent', `[exited with code ${code}]`);
+    if (state.agent !== 'starting') setState({ agent: 'stopped', agentStartedAt: null });
     agentProcess = null;
   });
 
-  setState({ agent: 'running' });
+  // Fallback: if agent doesn't self-report ready within 10s, mark running anyway
+  setTimeout(() => {
+    if (state.agent === 'starting' && agentProcess) {
+      setState({ agent: 'running', agentStartedAt: Date.now() });
+    }
+  }, 10000);
 }
 
-function stopCloud() {
-  if (cloudProcess) { cloudProcess.kill(); cloudProcess = null; }
-  setState({ cloud: 'stopped' });
+async function stopCloud() {
+  if (!cloudProcess) { setState({ cloud: 'stopped', port: null, cloudStartedAt: null }); return; }
+  setState({ cloud: 'stopping' });
+  const proc = cloudProcess;
+  cloudProcess = null;
+  proc.kill('SIGTERM');
+  await waitForExit(proc);
+  setState({ cloud: 'stopped', port: null, cloudStartedAt: null });
 }
 
-function stopAgent() {
-  if (agentProcess) { agentProcess.kill(); agentProcess = null; }
-  setState({ agent: 'stopped' });
+async function stopAgent() {
+  if (!agentProcess) { setState({ agent: 'stopped', agentStartedAt: null }); return; }
+  setState({ agent: 'stopping' });
+  const proc = agentProcess;
+  agentProcess = null;
+  proc.kill('SIGTERM');
+  await waitForExit(proc);
+  setState({ agent: 'stopped', agentStartedAt: null });
 }
 
 async function restartAll() {
-  stopAgent();
-  stopCloud();
-  await new Promise(r => setTimeout(r, 600));
+  await stopAgent();
+  await stopCloud();
+  // Find a fresh port — old one may still be in TIME_WAIT after SIGTERM
+  appPort = await findFreePort();
   await startCloud(appPort);
   startAgent(appPort);
+  // Reload main window to new port
+  if (mainWindow) mainWindow.loadURL(`http://127.0.0.1:${appPort}`);
 }
 
 function killAll() {
@@ -354,18 +387,9 @@ function killAll() {
 // ── Tray ──────────────────────────────────────────────────────────────────────
 
 function makeTrayIcon() {
-  // PNG template image — filename contains "Template" so macOS auto-inverts
-  // for light/dark menu bar. @2x version is used automatically on retina.
   const img = nativeImage.createFromPath(join(__dirname, '..', 'assets', 'trayTemplate.png'));
   img.setTemplateImage(true);
   return img;
-}
-
-function overallStatus() {
-  if (state.cloud === 'running' && state.agent === 'running') return 'running';
-  if (state.cloud === 'error' || state.agent === 'error') return 'error';
-  if (state.cloud === 'starting' || state.agent === 'starting') return 'starting';
-  return 'stopped';
 }
 
 function updateTray() {
@@ -373,17 +397,25 @@ function updateTray() {
   tray.setImage(makeTrayIcon());
 
   const isRunning = state.cloud === 'running';
-  const isBusy = state.cloud === 'starting' || state.agent === 'starting';
+  const isBusy = ['starting', 'stopping'].includes(state.cloud) ||
+                 ['starting', 'stopping'].includes(state.agent);
 
   const menu = Menu.buildFromTemplate([
     { label: '49Agents', enabled: false },
     { label: `Cloud: ${state.cloud}  ·  Agent: ${state.agent}`, enabled: false },
     { type: 'separator' },
     { label: 'Open 49Agents', click: openMainWindow, enabled: isRunning },
-    { label: 'Dashboard', click: openDashboard },
+    { label: 'Control Panel', click: openDashboard },
     { type: 'separator' },
     { label: 'Restart', click: () => restartAll(), enabled: !isBusy },
-    { label: isRunning ? 'Stop' : 'Start', click: () => isRunning ? (stopAgent(), stopCloud()) : (startCloud(appPort).then(() => startAgent(appPort))), enabled: !isBusy },
+    {
+      label: isRunning ? 'Stop' : 'Start',
+      enabled: !isBusy,
+      click: () => {
+        if (isRunning) { stopAgent().then(() => stopCloud()); }
+        else { startCloud(appPort).then(() => startAgent(appPort)); }
+      },
+    },
     { type: 'separator' },
     { label: 'Check for Updates', click: () => checkForUpdates(true) },
     { label: 'Quit', click: () => app.quit() },
@@ -404,9 +436,11 @@ function openDashboard() {
   if (dashboardWindow) { dashboardWindow.focus(); return; }
 
   dashboardWindow = new BrowserWindow({
-    width: 500,
-    height: 620,
-    resizable: false,
+    width: 520,
+    height: 660,
+    resizable: true,
+    minWidth: 420,
+    minHeight: 500,
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#050D18',
     webPreferences: {
@@ -419,12 +453,15 @@ function openDashboard() {
   dashboardWindow.loadFile(join(__dirname, 'dashboard.html'));
   dashboardWindow.on('closed', () => { dashboardWindow = null; });
 
-  dashboardWindow.webContents.on('did-finish-load', () => {
-    dashboardWindow?.webContents.send('state', getPublicState());
-    for (const entry of state.cloudLogs.slice(-100))
-      dashboardWindow?.webContents.send('log', { service: 'cloud', ...entry });
-    for (const entry of state.agentLogs.slice(-100))
-      dashboardWindow?.webContents.send('log', { service: 'agent', ...entry });
+  // Renderer signals ready via IPC after mounting — avoids the race where
+  // did-finish-load fires before JS listeners are registered.
+  ipcMain.once('dashboard-ready', () => {
+    if (!dashboardWindow) return;
+    dashboardWindow.webContents.send('state', getPublicState());
+    for (const entry of state.cloudLogs.slice(-200))
+      dashboardWindow.webContents.send('log', { service: 'cloud', ...entry });
+    for (const entry of state.agentLogs.slice(-200))
+      dashboardWindow.webContents.send('log', { service: 'agent', ...entry });
   });
 }
 
@@ -439,7 +476,12 @@ function openMainWindow() {
     minWidth: 800,
     minHeight: 600,
     title: '49Agents',
-    webPreferences: { nodeIntegration: false, contextIsolation: true, webSecurity: false, backgroundThrottling: false },
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: false,
+      backgroundThrottling: false,
+    },
   });
 
   mainWindow.loadURL(`http://127.0.0.1:${appPort}`);
@@ -461,16 +503,19 @@ function openMainWindow() {
 
 ipcMain.handle('get-state', () => getPublicState());
 ipcMain.handle('get-logs', (_, service) =>
-  (service === 'cloud' ? state.cloudLogs : state.agentLogs).slice(-100)
+  (service === 'cloud' ? state.cloudLogs : state.agentLogs).slice(-200)
 );
 ipcMain.handle('action', async (_, action) => {
   switch (action) {
     case 'open':    openMainWindow(); break;
     case 'restart': await restartAll(); break;
-    case 'stop':    stopAgent(); stopCloud(); break;
+    case 'stop':    await stopAgent(); await stopCloud(); break;
     case 'start':   await startCloud(appPort); startAgent(appPort); break;
   }
 });
+// Consumed via ipcMain.once inside openDashboard; register a no-op so
+// Electron doesn't warn about unhandled channel on subsequent fires.
+ipcMain.on('dashboard-ready', () => {});
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
@@ -499,8 +544,6 @@ app.whenReady().then(async () => {
 
   try {
     if (app.isPackaged) {
-      // Resources dir is read-only; copy cloud+agent to writable userData and
-      // npm install there on first launch.
       log('preparing services in userData...');
       const prepared = prepareServices(userData);
       cloudDir = prepared.cloudDir;
@@ -526,11 +569,10 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  // Keep running — user can reopen via dock or tray.
+  // Keep running — user can reopen via tray.
 });
 
 app.on('activate', () => {
-  // Dock icon clicked — bring up main window if server is running.
   if (appPort) openMainWindow();
 });
 

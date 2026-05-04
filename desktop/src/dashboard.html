@@ -3,21 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>49Agents Dashboard</title>
+<title>49Agents Control Panel</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg: #050D18;
-    --bg2: #0a1628;
-    --bg3: #0f1f38;
+    --bg:     #050D18;
+    --bg2:    #0a1628;
+    --bg3:    #0f1f38;
     --border: #1a2f50;
-    --text: #e2e8f0;
-    --muted: #64748b;
-    --blue: #3b82f6;
-    --green: #4ade80;
+    --text:   #e2e8f0;
+    --muted:  #64748b;
+    --blue:   #3b82f6;
+    --green:  #4ade80;
     --yellow: #facc15;
-    --red: #f87171;
+    --red:    #f87171;
+    --orange: #fb923c;
   }
 
   html, body {
@@ -38,14 +39,11 @@
     padding: 0 16px 0 80px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+    gap: 8px;
   }
 
-  .titlebar-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--muted);
-    letter-spacing: 0.02em;
-  }
+  .titlebar-title   { font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
+  .titlebar-version { font-size: 11px; color: var(--muted); opacity: 0.5; }
 
   .layout {
     display: flex;
@@ -67,253 +65,305 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 12px 14px;
+    transition: border-color 0.25s;
   }
+  .status-card.running  { border-color: #1a4a28; }
+  .status-card.error    { border-color: #4a1a1a; }
+  .status-card.stopping { border-color: #3a2a10; }
 
   .status-card-label {
-    font-size: 11px;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-bottom: 6px;
+    font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px;
   }
 
-  .status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    font-weight: 500;
-  }
+  .status-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; }
 
   .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; transition: background 0.2s;
   }
-
   .dot-running  { background: var(--green); box-shadow: 0 0 6px var(--green); }
-  .dot-starting { background: var(--yellow); }
+  .dot-starting { background: var(--yellow); animation: pulse 1s infinite; }
+  .dot-stopping { background: var(--orange); animation: pulse 1s infinite; }
   .dot-error    { background: var(--red); }
   .dot-stopped  { background: var(--muted); }
 
-  .port-hint {
-    font-size: 11px;
-    color: var(--muted);
-    margin-top: 4px;
-  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+  .status-meta { font-size: 11px; color: var(--muted); margin-top: 4px; min-height: 16px; }
 
   /* Actions */
-  .actions {
-    display: flex;
-    gap: 8px;
-    padding: 0 16px 14px;
-    flex-shrink: 0;
-  }
+  .actions { display: flex; gap: 8px; padding: 0 16px 14px; flex-shrink: 0; }
 
   button {
-    flex: 1;
-    height: 32px;
-    border: none;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
+    flex: 1; height: 32px; border: none; border-radius: 6px;
+    font-size: 12px; font-weight: 500; cursor: pointer;
     transition: opacity 0.15s, transform 0.1s;
     -webkit-app-region: no-drag;
   }
+  button:active   { transform: scale(0.97); }
+  button:disabled { opacity: 0.35; cursor: default; transform: none; }
 
-  button:active { transform: scale(0.97); }
-  button:disabled { opacity: 0.4; cursor: default; transform: none; }
-
-  .btn-primary {
-    background: var(--blue);
-    color: #fff;
-  }
-
-  .btn-secondary {
-    background: var(--bg3);
-    color: var(--text);
-    border: 1px solid var(--border);
-  }
-
-  .btn-open {
-    background: #0f2a18;
-    color: var(--green);
-    border: 1px solid #1a4a28;
-  }
+  .btn-primary   { background: var(--blue);  color: #fff; }
+  .btn-stop      { background: #2d0f0f; color: var(--red); border: 1px solid #4a1a1a; }
+  .btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+  .btn-open      { background: #0f2a18; color: var(--green); border: 1px solid #1a4a28; }
 
   /* Log section */
-  .log-section {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    border-top: 1px solid var(--border);
-  }
+  .log-section { flex: 1; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--border); }
 
-  .log-tabs {
-    display: flex;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
+  .log-toolbar { display: flex; align-items: center; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 
   .log-tab {
-    padding: 8px 16px;
-    font-size: 12px;
-    color: var(--muted);
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    transition: color 0.15s;
-    -webkit-app-region: no-drag;
+    padding: 8px 16px; font-size: 12px; color: var(--muted); cursor: pointer;
+    border-bottom: 2px solid transparent; transition: color 0.15s;
+    -webkit-app-region: no-drag; user-select: none;
+  }
+  .log-tab.active { color: var(--text); border-bottom-color: var(--blue); }
+
+  .badge {
+    display: inline-block; background: var(--red); color: #fff;
+    font-size: 10px; font-weight: 600; border-radius: 8px;
+    padding: 0 5px; margin-left: 5px; vertical-align: middle; line-height: 15px;
   }
 
-  .log-tab.active {
-    color: var(--text);
-    border-bottom-color: var(--blue);
-  }
+  .log-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; padding-right: 10px; }
 
-  .log-clear {
-    margin-left: auto;
-    padding: 8px 14px;
-    font-size: 11px;
-    color: var(--muted);
-    cursor: pointer;
-    -webkit-app-region: no-drag;
+  .log-btn {
+    padding: 4px 10px; font-size: 11px; color: var(--muted); cursor: pointer;
+    border-radius: 4px; -webkit-app-region: no-drag; user-select: none;
+    border: none; background: none; height: auto; flex: none;
+    transition: color 0.15s, background 0.15s;
   }
-
-  .log-clear:hover { color: var(--text); }
+  .log-btn:hover  { color: var(--text); background: var(--bg3); }
+  .log-btn.active { color: var(--blue); }
 
   .log-output {
-    flex: 1;
-    overflow-y: auto;
-    padding: 8px 14px 12px;
-    font-family: 'SF Mono', 'Menlo', monospace;
-    font-size: 11px;
-    line-height: 1.6;
-    color: #94a3b8;
+    flex: 1; overflow-y: auto; padding: 8px 14px 12px;
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 11px;
+    line-height: 1.6; color: #94a3b8;
   }
-
-  .log-output::-webkit-scrollbar { width: 4px; }
+  .log-output::-webkit-scrollbar       { width: 4px; }
   .log-output::-webkit-scrollbar-track { background: transparent; }
   .log-output::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-  .log-line { white-space: pre-wrap; word-break: break-all; }
-  .log-line.error { color: var(--red); }
+  .log-line        { white-space: pre-wrap; word-break: break-all; }
+  .log-line.err    { color: var(--red); }
+  .log-line.warn   { color: var(--yellow); }
+  .log-empty       { color: var(--muted); font-size: 12px; padding: 20px 0; text-align: center; }
 </style>
 </head>
 <body>
 
 <div class="titlebar">
-  <span class="titlebar-title">49Agents</span>
+  <span class="titlebar-title">49Agents Control Panel</span>
+  <span class="titlebar-version" id="ver"></span>
 </div>
 
 <div class="layout">
-
   <div class="status-row">
-    <div class="status-card">
+    <div class="status-card" id="card-cloud">
       <div class="status-card-label">Cloud Server</div>
       <div class="status-badge">
         <div class="status-dot" id="cloud-dot"></div>
         <span id="cloud-status">—</span>
       </div>
-      <div class="port-hint" id="port-hint"></div>
+      <div class="status-meta" id="cloud-meta"></div>
     </div>
-    <div class="status-card">
+    <div class="status-card" id="card-agent">
       <div class="status-card-label">Agent</div>
       <div class="status-badge">
         <div class="status-dot" id="agent-dot"></div>
         <span id="agent-status">—</span>
       </div>
+      <div class="status-meta" id="agent-meta"></div>
     </div>
   </div>
 
   <div class="actions">
-    <button class="btn-open" id="btn-open">Open 49Agents</button>
-    <button class="btn-primary" id="btn-restart">Restart</button>
+    <button class="btn-open"      id="btn-open">Open 49Agents</button>
+    <button class="btn-primary"   id="btn-restart">Restart</button>
     <button class="btn-secondary" id="btn-startstop">Stop</button>
   </div>
 
   <div class="log-section">
-    <div class="log-tabs">
-      <div class="log-tab active" data-tab="cloud">Cloud</div>
-      <div class="log-tab" data-tab="agent">Agent</div>
-      <div class="log-clear" id="log-clear">Clear</div>
+    <div class="log-toolbar">
+      <div class="log-tab active" data-tab="cloud">
+        Cloud <span class="badge" id="badge-cloud" style="display:none"></span>
+      </div>
+      <div class="log-tab" data-tab="agent">
+        Agent <span class="badge" id="badge-agent" style="display:none"></span>
+      </div>
+      <div class="log-actions">
+        <button class="log-btn active" id="btn-autoscroll">Auto-scroll</button>
+        <button class="log-btn"        id="btn-clear">Clear</button>
+      </div>
     </div>
     <div class="log-output" id="log-output"></div>
   </div>
-
 </div>
 
 <script>
-  let currentTab = 'cloud';
-  let logs = { cloud: [], agent: [] };
-  let currentState = { cloud: 'stopped', agent: 'stopped', port: null };
-
-  const dotClass = (s) => {
-    if (s === 'running') return 'dot-running';
-    if (s === 'starting') return 'dot-starting';
-    if (s === 'error') return 'dot-error';
-    return 'dot-stopped';
+  let currentTab  = 'cloud';
+  let autoScroll  = true;
+  let logs        = { cloud: [], agent: [] };
+  let errCounts   = { cloud: 0, agent: 0 };
+  let currentState = {
+    cloud: 'stopped', agent: 'stopped',
+    port: null, cloudStartedAt: null, agentStartedAt: null,
   };
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+
+  function dotClass(s) {
+    return { running: 'dot-running', starting: 'dot-starting', stopping: 'dot-stopping', error: 'dot-error' }[s] || 'dot-stopped';
+  }
+
+  function cardClass(s) {
+    return { running: 'running', error: 'error', stopping: 'stopping' }[s] || '';
+  }
+
+  function formatUptime(startedAt) {
+    if (!startedAt) return '';
+    const secs = Math.floor((Date.now() - startedAt) / 1000);
+    if (secs < 60)   return `up ${secs}s`;
+    if (secs < 3600) return `up ${Math.floor(secs / 60)}m ${secs % 60}s`;
+    return `up ${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+  }
+
+  function isErr(line)  { return /\berror\b|exception|uncaughtException|unhandledRejection/i.test(line); }
+  function isWarn(line) { return /\bwarn(ing)?\b/i.test(line); }
+
+  // ── State rendering ──────────────────────────────────────────────────────────
 
   function applyState(s) {
     currentState = s;
+    for (const svc of ['cloud', 'agent']) {
+      document.getElementById(`${svc}-dot`).className    = `status-dot ${dotClass(s[svc])}`;
+      document.getElementById(`${svc}-status`).textContent = s[svc];
+      document.getElementById(`card-${svc}`).className   = `status-card ${cardClass(s[svc])}`;
+    }
+    renderUptimes();
+    renderButtons();
+  }
 
-    document.getElementById('cloud-dot').className = `status-dot ${dotClass(s.cloud)}`;
-    document.getElementById('cloud-status').textContent = s.cloud;
-    document.getElementById('agent-dot').className = `status-dot ${dotClass(s.agent)}`;
-    document.getElementById('agent-status').textContent = s.agent;
-    document.getElementById('port-hint').textContent = s.port ? `port ${s.port}` : '';
+  function renderUptimes() {
+    const s = currentState;
+    const cm = document.getElementById('cloud-meta');
+    if (s.cloudStartedAt) {
+      cm.textContent = (s.port ? `port ${s.port}  ·  ` : '') + formatUptime(s.cloudStartedAt);
+    } else if (s.port) {
+      cm.textContent = `port ${s.port}`;
+    } else {
+      cm.textContent = '';
+    }
+    const am = document.getElementById('agent-meta');
+    am.textContent = s.agentStartedAt ? formatUptime(s.agentStartedAt) : '';
+  }
 
+  function renderButtons() {
+    const s = currentState;
     const isRunning = s.cloud === 'running';
-    const isBusy = s.cloud === 'starting' || s.agent === 'starting';
+    const isBusy    = ['starting','stopping'].includes(s.cloud) || ['starting','stopping'].includes(s.agent);
 
-    document.getElementById('btn-open').disabled = !isRunning;
-    document.getElementById('btn-restart').disabled = isBusy;
+    document.getElementById('btn-open').disabled      = !isRunning;
+    document.getElementById('btn-restart').disabled   = isBusy;
     document.getElementById('btn-startstop').disabled = isBusy;
-    document.getElementById('btn-startstop').textContent = isRunning ? 'Stop' : 'Start';
+
+    const btn = document.getElementById('btn-startstop');
+    if (isRunning) {
+      btn.textContent = 'Stop';
+      btn.className   = 'btn-stop';
+    } else {
+      btn.textContent = 'Start';
+      btn.className   = 'btn-secondary';
+    }
+  }
+
+  // ── Log rendering ─────────────────────────────────────────────────────────────
+
+  function makeLine(entry) {
+    const div = document.createElement('div');
+    div.className = `log-line${isErr(entry.line) ? ' err' : isWarn(entry.line) ? ' warn' : ''}`;
+    div.textContent = entry.line;
+    return div;
   }
 
   function renderLogs() {
     const el = document.getElementById('log-output');
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    el.innerHTML = logs[currentTab].map(({ line }) => {
-      const isErr = /error|fail|exception/i.test(line);
-      const escaped = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      return `<div class="log-line${isErr ? ' error' : ''}">${escaped}</div>`;
-    }).join('');
-    if (atBottom) el.scrollTop = el.scrollHeight;
+    if (!logs[currentTab].length) {
+      el.innerHTML = '<div class="log-empty">No logs yet.</div>';
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const entry of logs[currentTab]) frag.appendChild(makeLine(entry));
+    el.innerHTML = '';
+    el.appendChild(frag);
+    if (autoScroll) el.scrollTop = el.scrollHeight;
   }
 
   function appendLog(entry) {
     logs[entry.service].push(entry);
-    if (logs[entry.service].length > 500) logs[entry.service].shift();
+    if (logs[entry.service].length > 1000) logs[entry.service].shift();
+
+    if (isErr(entry.line) && entry.service !== currentTab) {
+      errCounts[entry.service]++;
+      updateBadge(entry.service);
+    }
+
     if (entry.service === currentTab) {
       const el = document.getElementById('log-output');
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-      const div = document.createElement('div');
-      const isErr = /error|fail|exception/i.test(entry.line);
-      div.className = `log-line${isErr ? ' error' : ''}`;
-      div.textContent = entry.line;
-      el.appendChild(div);
-      if (atBottom) el.scrollTop = el.scrollHeight;
+      const placeholder = el.querySelector('.log-empty');
+      if (placeholder) placeholder.remove();
+
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+      el.appendChild(makeLine(entry));
+      if (autoScroll && atBottom) el.scrollTop = el.scrollHeight;
     }
   }
 
-  // Tab switching
+  function updateBadge(service) {
+    const badge = document.getElementById(`badge-${service}`);
+    const n = errCounts[service];
+    badge.textContent  = n > 99 ? '99+' : String(n);
+    badge.style.display = (n > 0 && service !== currentTab) ? 'inline-block' : 'none';
+  }
+
+  // ── Event listeners ───────────────────────────────────────────────────────────
+
   document.querySelectorAll('.log-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.log-tab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
       currentTab = tab.dataset.tab;
+      errCounts[currentTab] = 0;
+      updateBadge(currentTab);
       renderLogs();
     });
   });
 
-  document.getElementById('log-clear').addEventListener('click', () => {
+  document.getElementById('btn-clear').addEventListener('click', () => {
     logs[currentTab] = [];
+    errCounts[currentTab] = 0;
+    updateBadge(currentTab);
     renderLogs();
+  });
+
+  document.getElementById('btn-autoscroll').addEventListener('click', (e) => {
+    autoScroll = !autoScroll;
+    e.currentTarget.classList.toggle('active', autoScroll);
+    if (autoScroll) {
+      const el = document.getElementById('log-output');
+      el.scrollTop = el.scrollHeight;
+    }
+  });
+
+  document.getElementById('log-output').addEventListener('scroll', (e) => {
+    const el = e.currentTarget;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (!atBottom && autoScroll) {
+      autoScroll = false;
+      document.getElementById('btn-autoscroll').classList.remove('active');
+    }
   });
 
   document.getElementById('btn-open').addEventListener('click', () => window.api.action('open'));
@@ -322,20 +372,18 @@
     window.api.action(currentState.cloud === 'running' ? 'stop' : 'start');
   });
 
-  // IPC listeners
+  // ── IPC ───────────────────────────────────────────────────────────────────────
+
   window.api.onState(applyState);
   window.api.onLog(appendLog);
 
-  // Bootstrap
-  (async () => {
-    const s = await window.api.getState();
-    applyState(s);
-    const cloudLogs = await window.api.getLogs('cloud');
-    const agentLogs = await window.api.getLogs('agent');
-    logs.cloud = cloudLogs;
-    logs.agent = agentLogs;
-    renderLogs();
-  })();
+  // ── Bootstrap ─────────────────────────────────────────────────────────────────
+
+  setInterval(renderUptimes, 1000);
+
+  // Signal main that we're ready — main replays state + log history on this event,
+  // which avoids the race where did-finish-load fires before listeners are registered.
+  window.api.ready();
 </script>
 </body>
 </html>
