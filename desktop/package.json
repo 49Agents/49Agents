@@ -1,6 +1,6 @@
 {
   "name": "49agents-desktop",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "description": "49Agents desktop app for macOS",
   "type": "module",
   "main": "src/main.js",
@@ -8,6 +8,7 @@
     "prestart": "node scripts/prestart.js",
     "prebuild": "cd ../cloud && npm run build",
     "start": "electron .",
+    "test": "node test/control-panel.test.mjs",
     "build": "electron-builder --mac",
     "build:dmg": "electron-builder --mac dmg",
     "release": "electron-builder --mac --publish always"
