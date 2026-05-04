@@ -11,6 +11,10 @@ const { autoUpdater } = updaterPkg;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// Disable GPU compositing — prevents the GPU process from saturating under
+// heavy terminal streaming, which causes whole-app lag in Electron.
+app.disableHardwareAcceleration();
+
 // ── Auto-updater ──────────────────────────────────────────────────────────────
 
 autoUpdater.autoDownload = false;
@@ -435,7 +439,7 @@ function openMainWindow() {
     minWidth: 800,
     minHeight: 600,
     title: '49Agents',
-    webPreferences: { nodeIntegration: false, contextIsolation: true, webSecurity: false },
+    webPreferences: { nodeIntegration: false, contextIsolation: true, webSecurity: false, backgroundThrottling: false },
   });
 
   mainWindow.loadURL(`http://127.0.0.1:${appPort}`);
