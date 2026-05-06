@@ -10,6 +10,10 @@ const DEFAULTS = {
   terminal_font: 'JetBrains Mono',
   hud_state: '{}',
   tutorials_completed: '{}',
+  projects: '[]',
+  focus_mode: 0,
+  sidebar_position: 'right',
+  teleport_animation: 1,
 };
 
 /**
@@ -27,8 +31,8 @@ export function getPreferences(userId) {
 export function savePreferences(userId, prefs) {
   const db = getDb();
   db.prepare(`
-    INSERT INTO user_preferences (user_id, night_mode, terminal_theme, notification_sound, auto_remove_done, canvas_bg, snooze_duration, terminal_font, hud_state, tutorials_completed, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    INSERT INTO user_preferences (user_id, night_mode, terminal_theme, notification_sound, auto_remove_done, canvas_bg, snooze_duration, terminal_font, hud_state, tutorials_completed, projects, focus_mode, sidebar_position, teleport_animation, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(user_id) DO UPDATE SET
       night_mode = excluded.night_mode,
       terminal_theme = excluded.terminal_theme,
@@ -39,6 +43,10 @@ export function savePreferences(userId, prefs) {
       terminal_font = excluded.terminal_font,
       hud_state = excluded.hud_state,
       tutorials_completed = excluded.tutorials_completed,
+      projects = excluded.projects,
+      focus_mode = excluded.focus_mode,
+      sidebar_position = excluded.sidebar_position,
+      teleport_animation = excluded.teleport_animation,
       updated_at = datetime('now')
   `).run(
     userId,
@@ -50,6 +58,10 @@ export function savePreferences(userId, prefs) {
     prefs.snoozeDuration ?? 90,
     prefs.terminalFont || 'JetBrains Mono',
     prefs.hudState ? JSON.stringify(prefs.hudState) : '{}',
-    prefs.tutorialsCompleted ? JSON.stringify(prefs.tutorialsCompleted) : '{}'
+    prefs.tutorialsCompleted ? JSON.stringify(prefs.tutorialsCompleted) : '{}',
+    prefs.projects ? JSON.stringify(prefs.projects) : '[]',
+    prefs.focusMode ? 1 : 0,
+    prefs.projectsSidebarPosition || 'right',
+    prefs.teleportAnimation !== false ? 1 : 0
   );
 }

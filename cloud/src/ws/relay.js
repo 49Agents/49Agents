@@ -16,6 +16,7 @@ import { getSecretKey } from '../auth/github.js';
 import { getUserById } from '../db/users.js';
 import { upsertUser } from '../db/users.js';
 import { getLocalAuth } from '../auth/localAuth.js';
+import { getEmailAuth } from '../auth/emailAuth.js';
 import { handleBrowserConnection } from './browserHandler.js';
 import { handleAgentConnection } from './agentHandler.js';
 import { config } from '../config.js';
@@ -125,11 +126,24 @@ export function setupWebSocketRelay(server, options = {}) {
             });
             userId = devUser.id;
           } else {
-            // Local mode: try cloud auth first, then JWT cookies (guest sessions)
+            // Local mode: try cloud auth first, then email auth, then JWT cookies (guest sessions)
             const localAuth = getLocalAuth();
             if (localAuth) {
               const user = getUserById(localAuth.cloudUserId);
               if (user) {
+                userId = user.id;
+              }
+            }
+            // Fall back to email-based local auth — needed when accessing from a
+            // different hostname (e.g. Tailscale) where localhost cookies don't transfer.
+            if (!userId) {
+              const emailAuth = getEmailAuth();
+              if (emailAuth) {
+                const user = upsertUser({
+                  email: emailAuth.email,
+                  displayName: emailAuth.email.split('@')[0],
+                  avatarUrl: null,
+                });
                 userId = user.id;
               }
             }

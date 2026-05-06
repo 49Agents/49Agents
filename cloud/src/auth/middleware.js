@@ -3,6 +3,7 @@ import { issueAccessToken, getSecretKey } from './github.js';
 import { getUserById } from '../db/users.js';
 import { upsertUser } from '../db/users.js';
 import { getLocalAuth } from './localAuth.js';
+import { getEmailAuth } from './emailAuth.js';
 import { config } from '../config.js';
 
 const hasOAuth = !!(config.github.clientId || config.google.clientId);
@@ -46,8 +47,8 @@ async function handleAuth(req, res, next) {
       return next();
     }
 
-    // Local mode: try cloud-authenticated identity first, then fall through
-    // to JWT cookie check (supports guest sessions and cloud-callback auth)
+    // Local mode: try cloud-authenticated identity first, then email auth,
+    // then fall through to JWT cookie check (supports guest sessions)
     const localAuth = getLocalAuth();
     if (localAuth) {
       const user = getUserById(localAuth.cloudUserId) || upsertUser({
@@ -55,6 +56,18 @@ async function handleAuth(req, res, next) {
         email: localAuth.email,
         displayName: localAuth.displayName || 'Local User',
         avatarUrl: localAuth.avatarUrl,
+      });
+      req.user = user;
+      return next();
+    }
+
+    // Fall back to email-based local auth
+    const emailAuth = getEmailAuth();
+    if (emailAuth) {
+      const user = upsertUser({
+        email: emailAuth.email,
+        displayName: emailAuth.email.split('@')[0],
+        avatarUrl: null,
       });
       req.user = user;
       return next();
