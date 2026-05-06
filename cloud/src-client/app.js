@@ -4057,6 +4057,28 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       }
     }
 
+    // Restore tab group UI for all panes that belong to a group.
+    // renderOfflinePlaceholder and loadPanesFromAgent render panes individually
+    // and never call refreshTabBars — so tab groups appear as separate panes
+    // until we do this pass. We also ensure exactly one pane per group is active.
+    {
+      const seenGroups = new Set();
+      for (const p of state.panes) {
+        if (!p.tabGroupId || seenGroups.has(p.tabGroupId)) continue;
+        seenGroups.add(p.tabGroupId);
+        const groupPanes = state.panes.filter(g => g.tabGroupId === p.tabGroupId);
+        // Guarantee exactly one active pane per group — pick the first if none is set
+        const hasActive = groupPanes.some(g => g.tabGroupActive);
+        if (!hasActive && groupPanes.length > 0) groupPanes[0].tabGroupActive = true;
+        // Hide non-active panes, show active one
+        for (const gp of groupPanes) {
+          const el = document.getElementById(`pane-${gp.id}`);
+          if (el) el.style.display = gp.tabGroupActive ? '' : 'none';
+        }
+        refreshTabBars(p.tabGroupId);
+      }
+    }
+
     // Re-apply cached claude states now that panes are rendered
     // (states may have arrived before DOM elements existed)
     if (lastReceivedClaudeStates) {

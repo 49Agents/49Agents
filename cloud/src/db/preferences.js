@@ -10,25 +10,20 @@ const DEFAULTS = {
   terminal_font: 'JetBrains Mono',
   hud_state: '{}',
   tutorials_completed: '{}',
+  projects: '[]',
 };
 
-/**
- * Get preferences for a user (returns defaults if none saved).
- */
 export function getPreferences(userId) {
   const db = getDb();
   const row = db.prepare('SELECT * FROM user_preferences WHERE user_id = ?').get(userId);
   return row || { user_id: userId, ...DEFAULTS };
 }
 
-/**
- * Save/update user preferences (upsert).
- */
 export function savePreferences(userId, prefs) {
   const db = getDb();
   db.prepare(`
-    INSERT INTO user_preferences (user_id, night_mode, terminal_theme, notification_sound, auto_remove_done, canvas_bg, snooze_duration, terminal_font, hud_state, tutorials_completed, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    INSERT INTO user_preferences (user_id, night_mode, terminal_theme, notification_sound, auto_remove_done, canvas_bg, snooze_duration, terminal_font, hud_state, tutorials_completed, projects, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(user_id) DO UPDATE SET
       night_mode = excluded.night_mode,
       terminal_theme = excluded.terminal_theme,
@@ -39,6 +34,7 @@ export function savePreferences(userId, prefs) {
       terminal_font = excluded.terminal_font,
       hud_state = excluded.hud_state,
       tutorials_completed = excluded.tutorials_completed,
+      projects = excluded.projects,
       updated_at = datetime('now')
   `).run(
     userId,
@@ -50,6 +46,7 @@ export function savePreferences(userId, prefs) {
     prefs.snoozeDuration ?? 90,
     prefs.terminalFont || 'JetBrains Mono',
     prefs.hudState ? JSON.stringify(prefs.hudState) : '{}',
-    prefs.tutorialsCompleted ? JSON.stringify(prefs.tutorialsCompleted) : '{}'
+    prefs.tutorialsCompleted ? JSON.stringify(prefs.tutorialsCompleted) : '{}',
+    prefs.projects ? JSON.stringify(prefs.projects) : '[]'
   );
 }

@@ -180,6 +180,12 @@ export function initDatabase() {
     console.log('[db] Migration: Created recent_pane_contexts table');
   }
 
+  // Migration: projects column on user_preferences
+  try {
+    db.prepare("ALTER TABLE user_preferences ADD COLUMN projects TEXT NOT NULL DEFAULT '[]'").run();
+    console.log('[db] Migration: Added projects column to user_preferences');
+  } catch (e) { /* already exists */ }
+
   // Migration: notifications tables
   try {
     db.prepare('SELECT id FROM notifications LIMIT 1').get();

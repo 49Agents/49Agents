@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
   terminal_font      TEXT NOT NULL DEFAULT 'JetBrains Mono',
   hud_state          TEXT NOT NULL DEFAULT '{}',
   tutorials_completed TEXT NOT NULL DEFAULT '{}',
+  projects           TEXT NOT NULL DEFAULT '[]',
   updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
