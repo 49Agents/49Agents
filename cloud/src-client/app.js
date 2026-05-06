@@ -2814,7 +2814,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
     }
 
     // Current theme/font info for collapsed preview
-    const curTheme = TERMINAL_THEMES[currentTerminalTheme] || TERMINAL_THEMES.default;
+    const curTheme = TERMINAL_THEMES[currentTerminalTheme] || TERMINAL_THEMES.default || {};
     const curThemeDots = [curTheme.red, curTheme.green, curTheme.blue, curTheme.yellow, curTheme.magenta, curTheme.cyan].filter(Boolean)
       .map(c => `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${c};margin-right:2px;"></span>`).join('');
 
@@ -2943,7 +2943,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
           <div style="font-size:13px;">Terminal Theme</div>
           <div style="display:flex;align-items:center;gap:6px;">
             <span style="display:flex;gap:1px;">${curThemeDots}</span>
-            <span style="font-size:12px;color:#6a6a8a;">${curTheme.name}</span>
+            <span style="font-size:12px;color:#6a6a8a;">${curTheme.name || currentTerminalTheme}</span>
             <span id="settings-theme-arrow" style="font-size:10px;color:#6a6a8a;transition:transform 0.2s;">\u25B6</span>
           </div>
         </div>
@@ -3201,7 +3201,7 @@ import { initGitGraphDeps, renderGitGraphPane, fetchGitGraphData } from './modul
       _telemetry.track('feature.theme_change', { theme_name: themeKey });
       renderThemeList(themeSearch.value);
       // Update collapsed preview
-      const t = TERMINAL_THEMES[themeKey];
+      const t = TERMINAL_THEMES[themeKey] || {};
       const headerPreview = document.getElementById('settings-theme-header').querySelector('div:last-child');
       const dots = [t.red, t.green, t.blue, t.yellow, t.magenta, t.cyan].filter(Boolean)
         .map(c => `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${c};margin-right:2px;"></span>`).join('');

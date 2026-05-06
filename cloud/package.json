@@ -4,6 +4,7 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
+    "prestart": "node build.js",
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "build": "node build.js"
