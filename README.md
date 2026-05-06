@@ -1,5 +1,5 @@
 <p align="center">
-  <img alt="49Agents" src="https://github.com/user-attachments/assets/93d237b6-e1ec-40ea-aa30-6feb72ca6599" height="120" />
+  <img alt="49Agents" src="https://github.com/user-attachments/assets/4ee43d8f-75de-4305-98ca-09b4a96e1e5f" height="120" />
 </p>
 
 <h1 align="center">49 Agents IDE</h1>
