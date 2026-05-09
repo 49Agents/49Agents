@@ -20,6 +20,10 @@ app.commandLine.appendSwitch('disable-gpu-compositing');
 app.commandLine.appendSwitch('disable-software-rasterizer');
 app.commandLine.appendSwitch('disable-webgl');
 app.commandLine.appendSwitch('disable-webgl2');
+// Disable ScreenCaptureKit features — these run in the GPU process and cause
+// sustained CPU usage even when GL is disabled, because Chromium still
+// initialises the capture pipeline on macOS by default in Electron 36.
+app.commandLine.appendSwitch('disable-features', 'ScreenCaptureKitPickerScreen,ScreenCaptureKitStreamPickerSonoma,MacWebContentsOcclusion,SpareRendererForSitePerProcess,TimeoutHangingVideoCaptureStarts');
 
 // ── Auto-updater ──────────────────────────────────────────────────────────────
 
@@ -145,6 +149,10 @@ function prepareServices(userData) {
           cwd: dest,
           timeout: 120000,
         });
+      } else {
+        // Force better-sqlite3 rebuild on next step by clearing the ABI stamp.
+        const abiStampPath = join(dest, '.node-abi');
+        if (existsSync(abiStampPath)) rmSync(abiStampPath);
       }
       writeFileSync(versionStamp, appVersion);
       log(`${name} ready`);
