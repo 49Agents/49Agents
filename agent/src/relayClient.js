@@ -35,7 +35,6 @@ export class RelayClient extends EventEmitter {
 
     this.ws.on('open', () => {
       console.log('[RelayClient] Connected to cloud relay');
-      this.reconnectDelay = INITIAL_RECONNECT_DELAY;
       this.authenticate();
       this.resetPingTimer();
     });
@@ -82,6 +81,7 @@ export class RelayClient extends EventEmitter {
       case MSG.AGENT_AUTH_OK:
         console.log(`[RelayClient] Authentication successful — agent registered as "${os.hostname()}" (${payload?.agentId || 'unknown'})`);
         this.authenticated = true;
+        this.reconnectDelay = INITIAL_RECONNECT_DELAY;
         this.emit('authenticated', payload);
         break;
 
@@ -89,8 +89,12 @@ export class RelayClient extends EventEmitter {
         console.error('[RelayClient] Authentication failed:', payload?.reason);
         this.authenticated = false;
         this.emit('authFailed', payload);
-        // Don't reconnect on auth failure — token is invalid
-        this.intentionalClose = true;
+        // Local dev token is valid once the browser finishes local sign-in.
+        // Keep retrying instead of exiting before first-time setup completes.
+        if (this.authToken !== 'dev' || !payload?.reason?.includes('Local instance not authenticated')) {
+          // Don't reconnect on real auth failures — token is invalid.
+          this.intentionalClose = true;
+        }
         this.ws.close();
         break;
 

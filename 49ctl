@@ -69,6 +69,35 @@ read_pid() {
   return 1
 }
 
+start_detached() {
+  local log_file="$1"
+  local cwd="$2"
+  shift 2
+
+  node --input-type=module - "$log_file" "$cwd" "$@" <<'NODE'
+import { spawn } from 'child_process';
+import { closeSync, openSync } from 'fs';
+
+const [logFile, cwd, command, ...args] = process.argv.slice(2);
+if (!logFile || !cwd || !command) {
+  console.error('usage: start_detached <log-file> <cwd> <command> [args...]');
+  process.exit(2);
+}
+
+const logFd = openSync(logFile, 'a');
+const child = spawn(command, args, {
+  cwd,
+  detached: true,
+  env: process.env,
+  stdio: ['ignore', logFd, logFd],
+});
+
+child.unref();
+closeSync(logFd);
+process.stdout.write(String(child.pid));
+NODE
+}
+
 # Kill process by PID file
 kill_by_pidfile() {
   local pidfile="$1"
@@ -219,6 +248,65 @@ check_agent_deps() {
   fi
 }
 
+verify_cloud_runtime() {
+  (cd "$SCRIPT_DIR/cloud" && node --input-type=module -e "
+    import express from 'express';
+    import Database from 'better-sqlite3';
+    const db = new Database(':memory:');
+    db.exec('select 1');
+    db.close();
+    void express;
+  ") >/dev/null 2>&1
+}
+
+verify_agent_runtime() {
+  (cd "$SCRIPT_DIR/agent" && node --input-type=module -e "
+    import WebSocket from 'ws';
+    void WebSocket;
+  ") >/dev/null 2>&1
+}
+
+ensure_runtime_deps() {
+  if ! command -v npm &>/dev/null; then
+    echo -e "${RED}npm is required but was not found on PATH.${NC}"
+    exit 1
+  fi
+
+  if [ "${RUN_CLOUD:-false}" = "true" ]; then
+    if ! verify_cloud_runtime; then
+      echo -e "${YELLOW}Cloud dependencies are missing or need rebuild. Running npm install...${NC}"
+      (cd "$SCRIPT_DIR/cloud" && npm install --silent 2>&1)
+      if ! verify_cloud_runtime; then
+        echo -e "${RED}Cloud dependencies are still not usable after npm install.${NC}"
+        echo -e "${DIM}Try: cd cloud && npm rebuild better-sqlite3 --foreground-scripts${NC}"
+        exit 1
+      fi
+    fi
+
+    if [ ! -f "$SCRIPT_DIR/cloud/public/app.min.js" ]; then
+      echo -e "${YELLOW}Client assets are missing. Building...${NC}"
+      (cd "$SCRIPT_DIR/cloud" && npm run build --silent 2>&1)
+    fi
+
+    if [ ! -f "$SCRIPT_DIR/cloud/dl/49-agent.tar.gz" ]; then
+      echo -e "${YELLOW}Agent tarball is missing. Building...${NC}"
+      mkdir -p "$SCRIPT_DIR/cloud/dl"
+      tar czf "$SCRIPT_DIR/cloud/dl/49-agent.tar.gz" -C "$SCRIPT_DIR" agent/
+    fi
+  fi
+
+  if [ "${RUN_AGENT:-false}" = "true" ]; then
+    if ! verify_agent_runtime; then
+      echo -e "${YELLOW}Agent dependencies are missing. Running npm install...${NC}"
+      (cd "$SCRIPT_DIR/agent" && npm install --silent 2>&1)
+      if ! verify_agent_runtime; then
+        echo -e "${RED}Agent dependencies are still not usable after npm install.${NC}"
+        exit 1
+      fi
+    fi
+  fi
+}
+
 cmd_build() {
   echo -e "${YELLOW}Installing dependencies...${NC}"
   (cd "$SCRIPT_DIR/cloud" && npm install --silent 2>&1)
@@ -240,6 +328,8 @@ cmd_start() {
     cmd_setup
     return
   fi
+
+  ensure_runtime_deps
 
   local started=false
 
@@ -295,8 +385,8 @@ start_cloud() {
   fi
 
   echo -e "  Starting cloud server on port ${CLOUD_PORT}..."
-  PORT="$CLOUD_PORT" nohup node "$SCRIPT_DIR/cloud/src/index.js" >> "$CLOUD_LOG" 2>&1 &
-  local pid=$!
+  local pid
+  pid=$(PORT="$CLOUD_PORT" start_detached "$CLOUD_LOG" "$SCRIPT_DIR/cloud" node src/index.js)
   echo "$pid" > "$CLOUD_PID_FILE"
 
   # Wait briefly and verify it started
@@ -327,8 +417,8 @@ start_agent() {
   fi
 
   echo -e "  Starting agent (connecting to ${AGENT_CLOUD_URL})..."
-  TC_CLOUD_URL="$AGENT_CLOUD_URL" nohup node "$SCRIPT_DIR/agent/bin/49-agent.js" start >> "$AGENT_LOG" 2>&1 &
-  local pid=$!
+  local pid
+  pid=$(TC_CLOUD_URL="$AGENT_CLOUD_URL" start_detached "$AGENT_LOG" "$SCRIPT_DIR/agent" node bin/49-agent.js start)
   echo "$pid" > "$AGENT_PID_FILE"
 
   sleep 2
@@ -434,6 +524,8 @@ cmd_logs() {
 cmd_cloud_start() {
   load_config
   RUN_CLOUD=true
+  RUN_AGENT=false
+  ensure_runtime_deps
   start_cloud
 }
 
@@ -450,7 +542,9 @@ cmd_cloud_stop() {
 
 cmd_agent_start() {
   load_config
+  RUN_CLOUD=false
   RUN_AGENT=true
+  ensure_runtime_deps
   start_agent
 }
 
@@ -782,6 +876,10 @@ cmd_dev() {
     sleep 1
   fi
 
+  RUN_CLOUD=true
+  RUN_AGENT=false
+  ensure_runtime_deps
+
   # Build assets if needed
   if [ ! -f "$SCRIPT_DIR/cloud/public/app.min.js" ]; then
     echo -e "  ${YELLOW}Building client assets...${NC}"
@@ -795,8 +893,8 @@ cmd_dev() {
 
   # Start cloud server with isolated database
   echo -e "  Starting cloud server on port ${port}..."
-  PORT="$port" DATABASE_PATH="$dev_db" nohup node "$SCRIPT_DIR/cloud/src/index.js" >> "$dev_cloud_log" 2>&1 &
-  local cloud_pid=$!
+  local cloud_pid
+  cloud_pid=$(PORT="$port" DATABASE_PATH="$dev_db" start_detached "$dev_cloud_log" "$SCRIPT_DIR/cloud" node src/index.js)
   echo "$cloud_pid" > "$dev_cloud_pid"
   sleep 2
 

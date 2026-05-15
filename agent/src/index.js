@@ -165,6 +165,10 @@ export async function startAgent(options = {}) {
 
   relayClient.on('authFailed', (payload) => {
     console.error('[Agent] Authentication failed:', payload?.reason);
+    if (payload?.reason?.includes('Local instance not authenticated')) {
+      console.error('[Agent] Waiting for browser local sign-in before retrying.');
+      return;
+    }
     console.error('[Agent] Please re-run "49-agent login" to get a new token.');
     stopStatePolling();
     stopMetricsPolling();
